@@ -553,7 +553,6 @@ void G_players_cmd(gentity_t *ent, unsigned int dwCommand, int fDump)
 		cl     = &level.clients[idnum];
 		cl_ent = g_entities + idnum;
 
-		SanitizeString(cl->pers.cl_guid, guid, qfalse);
 		SanitizeString(cl->pers.netname, n2, qfalse);
 		n2[26]   = 0;
 		ref[0]   = 0;
@@ -563,13 +562,14 @@ void G_players_cmd(gentity_t *ent, unsigned int dwCommand, int fDump)
 		if (cl_ent->r.svFlags & SVF_BOT)
 		{
 			// omnibot requires 9 chars (OMNIBOT01)
+			SanitizeString(cl->pers.cl_guid, guid, qfalse);
 			guid[9] = '\0';
 		}
 		else
 		{
 			// display only 8 char with * for humans
-			guid[8] = '\0';
-			strcat(guid, "*");
+			guid[0] = '*';
+			SanitizeString(cl->pers.cl_guid + 24, guid + 1, qfalse);
 		}
 
 		// Rate info
