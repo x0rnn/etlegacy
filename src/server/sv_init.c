@@ -34,6 +34,10 @@
 
 #include "server.h"
 
+#ifdef FEATURE_TRACKER
+#include "sv_tracker.h"
+#endif
+
 // Attack log file is started when server is init (!= sv_running 1!)
 // we even log attacks when the server is waiting for rcon and doesn't run a map
 int attHandle = 0; // server attack log file handle
@@ -374,6 +378,10 @@ void SV_Startup(void)
 	svs.initialized = qtrue;
 
 	Cvar_Set("sv_running", "1");
+
+#ifdef FEATURE_TRACKER
+	Tracker_ServerStart();
+#endif
 }
 
 /**
@@ -503,21 +511,21 @@ void SV_SetExpectedHunkUsage(const char *mapname)
  */
 void SV_DemoChangeMaxClients(void)
 {
-	int      oldMaxClients, oldDemoClients;
-	int      i, j, k;
 	client_t *oldClients = NULL;
-	int      count;
-	//qboolean firstTime = svs.clients == NULL;
+	int      oldMaxClients, oldDemoClients, count;
+	int      i, j, k;
+	qboolean activePlayers = qfalse;
 
-	// == Checking the prerequisites
-	// Note: we check  here that we have enough slots to fit all clients, and that it doesn't overflow the MAX_CLIENTS the engine can support. Also, we save the oldMaxClients and oldDemoClients values.
+	// we check  here that we have enough slots to fit all clients, and that it doesn't overflow the MAX_CLIENTS the engine can support.
+	// also, we save the oldMaxClients and oldDemoClients values.
 
-	// -- Get the highest client number in use
+	// get the highest client number in use
 	count = 0;
 	for (i = 0 ; i < sv_maxclients->integer ; i++)
 	{
 		if (svs.clients[i].state >= CS_CONNECTED)
 		{
+			activePlayers = qtrue;
 			if (i > count)
 			{
 				count = i;
@@ -526,38 +534,36 @@ void SV_DemoChangeMaxClients(void)
 	}
 	count++;
 
-	// -- Save the previous oldMaxClients and oldDemoClients values, and update
-
-	// Save the previous sv_maxclients value before updating it
 	oldMaxClients = sv_maxclients->integer;
 	// update the cvars
 	Cvar_Get("sv_maxclients", "8", 0);
 	Cvar_Get("sv_democlients", "0", 0);   // unnecessary now that sv_democlients is not latched anymore?
-	// Save the previous sv_democlients (since it's updated instantly, we cannot get it directly), we use a trick by computing the difference between the new and previous sv_maxclients (the difference should indeed be the exact value of sv_democlients)
+
+	// save the previous sv_democlients (since it's updated instantly, we cannot get it directly),
+	// we use a trick by computing the difference between the new and previous sv_maxclients (the difference should indeed be the exact value of sv_democlients)
 	oldDemoClients = (oldMaxClients - sv_maxclients->integer);
-	if (oldDemoClients < 0) // if the difference is negative, this means that before it was set to 0 (because the newer sv_maxclients is greater than the old)
+
+	// if the difference is negative, this means that before it was set to 0 (because the newer sv_maxclients is greater than the old)
+	if (oldDemoClients < 0)
 	{
 		oldDemoClients = 0;
 	}
 
-	// -- Check limits
-	// never go below the highest client number in use (make sure we have enough room for all players)
+	// never go below the highest client number in use
 	SV_BoundMaxClients(count);
 
-	// -- Change check: if still the same, we just quit, there's nothing to do
-	if (sv_maxclients->integer == oldMaxClients)
+	if (sv_maxclients->integer == oldMaxClients && !activePlayers)
 	{
 		return;
 	}
 
-	// == Memorizing clients
-	// Note: we save in a temporary variables the clients, because after we will wipe completely the svs.clients struct
-
 	// copy the clients to hunk memory
-	oldClients = Hunk_AllocateTempMemory((sv_maxclients->integer - sv_democlients->integer) * sizeof(client_t));   // we allocate just enough memory for the real clients (not counting in the democlients)
-	// For all previous clients slots, we copy the entire client into a temporary var
-	for (i = 0, j = 0, k = sv_privateClients->integer ; i < oldMaxClients ; i++)     // for all the previously connected clients, we copy them to a temporary var
-	{   // If there is a real client in this slot
+	// we allocate just enough memory for the real clients (not counting in the democlients)
+	oldClients = Hunk_AllocateTempMemory((sv_maxclients->integer - sv_democlients->integer) * sizeof(client_t));
+
+	// for all the previously connected clients, we copy them to a temporary var
+	for (i = 0, j = 0, k = sv_privateClients->integer ; i < oldMaxClients ; i++)
+	{   // if there is a real client in this slot
 		if (svs.clients[i].state >= CS_CONNECTED)
 		{
 			// if the client is in a privateClient reserved slot, we move him on the reserved slots
@@ -573,23 +579,28 @@ void SV_DemoChangeMaxClients(void)
 		}
 	}
 
-	// Fill in the remaining clients slots with empty clients (else the engine crash when copying into memory svs.clients)
-	for (i = j; i < sv_privateClients->integer; i++)   // Fill the privateClients empty slots
+	// fill in the remaining clients slots with empty clients (else the engine crash when copying into memory svs.clients)
+	for (i = j; i < sv_privateClients->integer; i++)
 	{
 		Com_Memset(&oldClients[i], 0, sizeof(client_t));
 	}
-	for (i = k; i < (sv_maxclients->integer - sv_democlients->integer); i++)   // Fill the other normal clients slots
+	for (i = k; i < (sv_maxclients->integer - sv_democlients->integer); i++)
 	{
 		Com_Memset(&oldClients[i], 0, sizeof(client_t));
 	}
 
 	// free old clients arrays
-	Z_Free(svs.clients);
+	// avoid trying to allocate large chunk on a fragmented zone
+	Com_Dealloc(svs.clients);
 
-	// == Allocating the new svs.clients and moving the saved clients over from the temporary var
+	// allocate new clients
+	// avoid trying to allocate large chunk on a fragmented zone
+	svs.clients = calloc(sizeof(client_t) * sv_maxclients->integer, 1);
+	if (!svs.clients)
+	{
+		Com_Error(ERR_FATAL, "SV_Startup: unable to allocate svs.clients");
+	}
 
-	// allocate new svs.clients
-	svs.clients = Z_Malloc(sv_maxclients->integer * sizeof(client_t));
 	Com_Memset(svs.clients, 0, sv_maxclients->integer * sizeof(client_t));
 
 	// copy the clients over (and move them depending on sv_democlients: if >0, move them upwards, if == 0, move them to their original slots)
@@ -598,19 +609,8 @@ void SV_DemoChangeMaxClients(void)
 	// free the old clients on the hunk
 	Hunk_FreeTempMemory(oldClients);
 
-	// == Allocating snapshot entities
-
 	// allocate new snapshot entities
 	SV_SetNumSnapshotEntities();
-
-	// == Server-side demos management
-
-	// set demostate to none if it was just waiting to set maxclients and move real clients slots
-	if (sv.demoState == DS_WAITINGSTOP)
-	{
-		sv.demoState = DS_NONE;
-		Cvar_SetValue("sv_demoState", DS_NONE);
-	}
 }
 
 /**
@@ -628,7 +628,16 @@ static void SV_ClearServer(void)
 		}
 	}
 
-	Com_Memset(&sv, 0, sizeof(sv));
+	if (!sv_serverTimeReset->integer)
+	{
+		i = sv.time;
+		Com_Memset(&sv, 0, sizeof(sv));
+		sv.time = i;
+	}
+	else
+	{
+		Com_Memset(&sv, 0, sizeof(sv));
+	}
 }
 
 /**
@@ -712,18 +721,15 @@ void SV_SpawnServer(const char *server)
 	}
 	else
 	{
-		// check for maxclients change
-		if (sv_maxclients->modified)
+		// if we are playing/waiting to play/waiting to stop a demo, we use a specialized function that will move real clients slots
+		// (so that democlients will be put to their original slots they were affected at the time of the real game)
+		if (sv_demoState->integer)
 		{
-			// If we are playing/waiting to play/waiting to stop a demo, we use a specialized function that will move real clients slots (so that democlients will be put to their original slots they were affected at the time of the real game)
-			if (sv.demoState == DS_WAITINGPLAYBACK || sv.demoState == DS_PLAYBACK || sv.demoState == DS_WAITINGSTOP)
-			{
-				SV_DemoChangeMaxClients();
-			}
-			else
-			{
-				SV_ChangeMaxClients();
-			}
+			SV_DemoChangeMaxClients();
+		}
+		else if (sv_maxclients->modified)
+		{
+			SV_ChangeMaxClients();
 		}
 	}
 
@@ -779,7 +785,7 @@ void SV_SpawnServer(const char *server)
 
 	if (sv_serverTimeReset->integer)
 	{
-		svs.time = 0;
+		sv.time = 0;
 	}
 
 	// load and spawn all other entities
@@ -788,8 +794,8 @@ void SV_SpawnServer(const char *server)
 	// run a few frames to allow everything to settle
 	for (i = 0 ; i < GAME_INIT_FRAMES ; i++)
 	{
-		VM_Call(gvm, GAME_RUN_FRAME, svs.time);
-		svs.time += FRAMETIME;
+		VM_Call(gvm, GAME_RUN_FRAME, sv.time);
+		sv.time += FRAMETIME;
 	}
 
 	// create a baseline for more efficient communications
@@ -848,8 +854,9 @@ void SV_SpawnServer(const char *server)
 	}
 
 	// run another frame to allow things to look at all the players
-	VM_Call(gvm, GAME_RUN_FRAME, svs.time);
+	VM_Call(gvm, GAME_RUN_FRAME, sv.time);
 
+	sv.time  += FRAMETIME;
 	svs.time += FRAMETIME;
 
 	// the server sends these to the clients so they can figure
@@ -940,12 +947,6 @@ void SV_SpawnServer(const char *server)
 	SV_UpdateConfigStrings();
 
 	Com_Printf("---------------------------------\n");
-
-	// start recording a demo
-	if (sv_autoDemo->integer)
-	{
-		SV_DemoAutoDemoRecord();
-	}
 }
 
 /**
@@ -1124,6 +1125,11 @@ void SV_Init(void)
 	sv_allowDownload = Cvar_Get("sv_allowDownload", "1", CVAR_ARCHIVE);
 
 	sv_hidden = Cvar_GetAndDescribe("sv_hidden", "0", CVAR_ARCHIVE, "Hide the server from queries and from master servers.");
+
+#ifdef FEATURE_TRACKER
+	// tracker server
+	Cvar_Get("sv_tracker", "et-tracker.trackbase.net:4444", CVAR_PROTECTED);
+#endif
 
 	sv_reconnectlimit = Cvar_Get("sv_reconnectlimit", "3", 0);
 	sv_tempbanmessage = Cvar_Get("sv_tempbanmessage", "You have been kicked and are temporarily banned from joining this server.", 0);
@@ -1306,4 +1312,8 @@ void SV_Shutdown(const char *finalmsg)
 
 	// disconnect any local clients
 	CL_Disconnect(qfalse);
+
+#ifdef FEATURE_TRACKER
+	Tracker_ServerStop();
+#endif
 }

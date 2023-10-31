@@ -34,6 +34,10 @@
 
 #include "server.h"
 
+#ifdef FEATURE_TRACKER
+#include "sv_tracker.h"
+#endif
+
 serverStatic_t svs;             // persistant server info
 server_t       sv;              // local server
 vm_t           *gvm = NULL;     // game virtual machine
@@ -536,6 +540,10 @@ void SV_MasterGameCompleteStatus()
 		}
 #endif
 	}
+
+#ifdef FEATURE_TRACKER
+	Tracker_MapEnd();
+#endif
 }
 
 /**
@@ -1374,6 +1382,12 @@ static void SV_CalcPings(void)
 			ps->ping = cl->ping;
 			continue;
 		}
+		if (cl->demoClient)
+		{
+			ps       = SV_GameClientNum(i);
+			cl->ping = ps->ping;
+			continue;
+		}
 
 		total = 0;
 		count = 0;
@@ -1643,7 +1657,7 @@ void SV_Frame(int msec)
 	// and clear sv.time, rather
 	// than checking for negative time wraparound everywhere.
 	// 2giga-milliseconds = 23 days, so it won't be too often
-	if (svs.time > 0x70000000)
+	if (sv.time > 0x70000000)
 	{
 		Q_strncpyz(mapname, sv_mapname->string, MAX_QPATH);
 		SV_Shutdown("Restarting server due to time wrapping");
@@ -1664,17 +1678,11 @@ void SV_Frame(int msec)
 		return;
 	}
 
-	if (sv.restartTime && svs.time >= sv.restartTime)
+	if (sv.restartTime && sv.time >= sv.restartTime)
 	{
 		sv.restartTime = 0;
 		Cbuf_AddText("map_restart 0\n");
 		return;
-	}
-
-	// start recording a demo
-	if (sv_autoDemo->integer)
-	{
-		SV_DemoAutoDemoRecord();
 	}
 
 	// update infostrings if anything has been changed
@@ -1699,6 +1707,12 @@ void SV_Frame(int msec)
 		cvar_modifiedFlags &= ~CVAR_WOLFINFO;
 	}
 
+	// start recording a demo
+	if (sv_autoDemo->integer)
+	{
+		SV_DemoAutoDemoRecord();
+	}
+
 	if (com_speeds->integer)
 	{
 		startTime = Sys_Milliseconds();
@@ -1715,23 +1729,23 @@ void SV_Frame(int msec)
 	while (sv.timeResidual >= frameMsec)
 	{
 		sv.timeResidual -= frameMsec;
+		sv.time         += frameMsec;
 		svs.time        += frameMsec;
 
 		// let everything in the world think and move
-		VM_Call(gvm, GAME_RUN_FRAME, svs.time);
+		VM_Call(gvm, GAME_RUN_FRAME, sv.time);
 
 		// play/record demo frame (if enabled)
 		if (sv.demoState == DS_RECORDING) // Record the frame
 		{
 			SV_DemoWriteFrame();
 		}
-		else if (sv.demoState == DS_WAITINGPLAYBACK || sv_demoState->integer == DS_WAITINGPLAYBACK) // Launch again the playback of the demo (because we needed a restart in order to set some cvars such as sv_maxclients or fs_game)
+		else if (sv_demoState->integer == DS_WAITINGPLAYBACK) // Launch again the playback of the demo (because we needed a restart in order to set some cvars such as sv_maxclients or fs_game)
 		{
 			SV_DemoRestartPlayback();
 		}
 		else if (sv.demoState == DS_PLAYBACK) // Play the next demo frame
 		{
-			Com_DPrintf("Playing back demo frame\n");
 			SV_DemoReadFrame();
 		}
 	}
@@ -1752,6 +1766,10 @@ void SV_Frame(int msec)
 
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat(HEARTBEAT_GAME);
+
+#ifdef FEATURE_TRACKER
+	Tracker_Frame(msec);
+#endif
 
 	if (com_dedicated->integer)
 	{

@@ -1042,6 +1042,7 @@ void R_LoadImage(const char *name, byte **pic, int *width, int *height)
 			data.size = ri.FS_ReadFile(altName, &data.buffer.v);
 			if (!data.buffer.b || data.size < 0)
 			{
+				Ren_Warning("Failed to load an image (%s) with size: %i\n", data.name, data.size);
 				continue;
 			}
 
@@ -1053,7 +1054,7 @@ void R_LoadImage(const char *name, byte **pic, int *width, int *height)
 
 			if (!loaderRet)
 			{
-				Ren_Drop("Image loader failed\n");
+				Ren_Drop("Image loader failed to parse an image %s\n", data.name);
 			}
 		}
 
@@ -1160,7 +1161,7 @@ image_t *R_FindImageFile(const char *name, qboolean mipmap, qboolean allowPicmip
 		tr.allowCompress = -1;
 	}
 
-	if (((width - 1) & width) || ((height - 1) & height))
+	if (!GLEW_ARB_texture_non_power_of_two && (((width - 1) & width) || ((height - 1) & height)))
 	{
 		Ren_Developer("WARNING: Image not power of 2 scaled: %s (%i:%i)\n", name, width, height);
 		return NULL;

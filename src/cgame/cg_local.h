@@ -2795,7 +2795,6 @@ extern vmCvar_t cg_autoReload;
 extern vmCvar_t cg_bloodDamageBlend;
 extern vmCvar_t cg_bloodFlash;
 extern vmCvar_t cg_bloodFlashTime;
-extern vmCvar_t cg_drawReinforcementTime;
 extern vmCvar_t cg_noAmmoAutoSwitch;
 extern vmCvar_t cg_printObjectiveInfo;
 #ifdef FEATURE_MULTIVIEW
@@ -2905,8 +2904,6 @@ extern vmCvar_t cg_drawUnit;
 extern vmCvar_t cg_visualEffects;  ///< turn invisible (0) / visible (1) visual effect (i.e airstrike plane, debris ...)
 extern vmCvar_t cg_bannerTime;
 
-extern vmCvar_t cg_shoutcastDrawPlayers;
-extern vmCvar_t cg_shoutcastDrawTeamNames;
 extern vmCvar_t cg_shoutcastTeamNameRed;
 extern vmCvar_t cg_shoutcastTeamNameBlue;
 extern vmCvar_t cg_shoutcastDrawHealth;
@@ -3160,21 +3157,11 @@ void CG_Text_PaintChar(float x, float y, float width, float height, float scale,
 
 void CG_DrawWeapHeat(rectDef_t *rect, int align);
 void CG_DrawPlayerWeaponIcon(rectDef_t *rect, int align, vec4_t *refcolor);
-int CG_CalculateReinfTime(qboolean menu);
-float CG_CalculateReinfTime_Float(qboolean menu);
-int CG_CalculateShoutcasterReinfTime(team_t team);
+int CG_CalculateReinfTime(team_t team);
+int CG_GetReinfTime(qboolean menu);
 void CG_Fade(int r, int g, int b, int a, int time, int duration);
 
 void CG_PlayerAmmoValue(int *ammo, int *clips, int *akimboammo, vec4_t **colorAmmo /*, vec4_t **colorClip*/);
-
-//cg_shoutcastoverlay.c
-
-void CG_DrawShoutcastPlayerList(void);
-void CG_DrawShoutcastPlayerStatus(void);
-void CG_DrawShoutcastTimer(void);
-void CG_DrawShoutcastPowerups(void);
-void CG_RequestPlayerStats(int clientNum);
-char *CG_ParseStats(char *data, int i);
 
 void CG_ToggleShoutcasterMode(int shoutcaster);
 void CG_ShoutcastCheckKeyCatcher(int keycatcher);
@@ -4092,7 +4079,7 @@ void CG_Debriefing_MouseEvent(int x, int y);
 
 void CG_Debriefing_ParseWeaponAccuracies(void);
 void CG_Debriefing_ParseWeaponStats(void);
-void CG_Debriefing_ParsePlayerKillsDeaths(void);
+void CG_Debriefing_ParsePlayerKillsDeaths(qboolean secondPart);
 void CG_Debriefing_ParsePlayerTime(void);
 void CG_Debriefing_ParseAwards(void);
 void CG_Debriefing_ParseSkillRating(void);
@@ -4216,7 +4203,7 @@ typedef struct
 	anchorPoint_t point;
 } anchor_t;
 
-#define HUD_COMPONENTS_NUM 53
+#define HUD_COMPONENTS_NUM 57
 
 typedef struct hudComponent_s
 {
@@ -4309,6 +4296,10 @@ typedef struct hudStructure_s
 	hudComponent_t crosshairbar;
 	hudComponent_t stats;
 	hudComponent_t xpgain;
+	hudComponent_t scPlayerListAxis;
+	hudComponent_t scPlayerListAllies;
+	hudComponent_t scTeamNamesAxis;
+	hudComponent_t scTeamNamesAllies;
 
 	hudComponent_t *components[HUD_COMPONENTS_NUM];
 } hudStucture_t;
@@ -4422,9 +4413,13 @@ void CG_DrawPing(hudComponent_t *comp);
 void CG_DrawSpeed(hudComponent_t *comp);
 void CG_DrawLagometer(hudComponent_t *comp);
 void CG_DrawDisconnect(hudComponent_t *comp);
-void CG_DrawPlayerStats(hudComponent_t *comp);
 void CG_DrawCrosshairNames(hudComponent_t *comp);
 void CG_DrawCrosshairHealthBar(hudComponent_t *comp);
+void CG_DrawShoutcastPlayerStatus(hudComponent_t *comp);
+void CG_DrawShoutcastPlayerListAxis(hudComponent_t *comp);
+void CG_DrawShoutcastPlayerListAllies(hudComponent_t *comp);
+void CG_DrawShoutcastTeamNameAxis(hudComponent_t *comp);
+void CG_DrawShoutcastTeamNameAllies(hudComponent_t *comp);
 
 /**
  * @brief Using the stringizing operator to save typing...

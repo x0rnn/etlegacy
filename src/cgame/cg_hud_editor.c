@@ -46,9 +46,9 @@
 #define INPUT_COLOR_WIDTH 35
 #define INPUT_HEIGHT 16
 #define CHECKBOX_SIZE 16
-#define SLIDERS_WIDTH 90
+#define SLIDERS_WIDTH 110
 #define SLIDERS_HEIGHT 16
-#define BUTTON_WIDTH 45
+#define BUTTON_WIDTH 55
 #define BUTTON_HEIGHT 16
 
 #define HUDEDITOR_CONTROLS_SPACER_XY 4
@@ -60,14 +60,14 @@
 #define HUDEDITOR_HUD_NAME_Y (HUDEDITOR_SELECTHUD_Y + HUDEDITOR_TITLE_SPACER_Y + (BUTTON_HEIGHT * 2) + (HUDEDITOR_CONTROLS_SPACER_XY * 2))
 
 #define HUDEDITOR_SIZEPOS_Y (HUDEDITOR_SELECTHUD_Y + BUTTON_HEIGHT + HUDEDITOR_TITLE_SPACER_Y + (BUTTON_HEIGHT * 3) + \
-	                         HUDEDITOR_CONTROLS_SPACER_XY + HUDEDITOR_CATEGORY_SPACER_Y)
+							 HUDEDITOR_CONTROLS_SPACER_XY + HUDEDITOR_CATEGORY_SPACER_Y)
 
 #define HUDEDITOR_TEXT_Y (HUDEDITOR_SIZEPOS_Y + HUDEDITOR_TITLE_SPACER_Y + HUDEDITOR_CATEGORY_SPACER_Y + \
-	                      (INPUT_HEIGHT * 2) + HUDEDITOR_CONTROLS_SPACER_XY)
+						  (INPUT_HEIGHT * 2) + HUDEDITOR_CONTROLS_SPACER_XY)
 
 
 #define HUDEDITOR_COLORSSTYLE_Y (HUDEDITOR_TEXT_Y + HUDEDITOR_TITLE_SPACER_Y + HUDEDITOR_CATEGORY_SPACER_Y + \
-	                             (INPUT_HEIGHT * 3) + HUDEDITOR_CONTROLS_SPACER_XY)
+								 (INPUT_HEIGHT * 3) + HUDEDITOR_CONTROLS_SPACER_XY)
 
 enum
 {
@@ -77,15 +77,22 @@ enum
 	HUD_COLOR_SELECTION_BORDER,
 };
 
+typedef enum hudShowLayout_e
+{
+	HUD_SHOW_LAYOUT_OFF,
+	HUD_SHOW_LAYOUT_VISIBLE_ONLY,
+	HUD_SHOW_LAYOUT_ALL,
+} hudShowLayout_t;
+
 float    HUDEditorX;
 float    HUDEditorWidth;
 float    HUDEditorCenterX;
 qboolean wsAdjusted = qfalse;
 
-static panel_button_t *lastFocusComponent;
-static qboolean       lastFocusComponentMoved;
-static int            elementColorSelection;
-static qboolean       showAllLayout = qfalse;
+static panel_button_t  *lastFocusComponent;
+static qboolean        lastFocusComponentMoved;
+static int             elementColorSelection;
+static hudShowLayout_t showLayout = HUD_SHOW_LAYOUT_OFF;
 
 static void CG_HudEditorUpdateFields(panel_button_t *button);
 static qboolean CG_HudEditor_Dropdown_KeyDown(panel_button_t *button, int key);
@@ -646,7 +653,7 @@ static panel_button_t hudEditorResetComp =
 {
 	NULL,
 	"Reset Component",
-	{ 0,                      HUDEDITOR_SELECTHUD_Y + HUDEDITOR_TITLE_SPACER_Y + BUTTON_HEIGHT + HUDEDITOR_CONTROLS_SPACER_XY,(BUTTON_WIDTH * 3) + (HUDEDITOR_CONTROLS_SPACER_XY * 2), BUTTON_HEIGHT },
+	{ 0,                      HUDEDITOR_SELECTHUD_Y + HUDEDITOR_TITLE_SPACER_Y + BUTTON_HEIGHT + HUDEDITOR_CONTROLS_SPACER_XY,(BUTTON_WIDTH * 3) + (HUDEDITOR_CONTROLS_SPACER_XY * 2) - 1, BUTTON_HEIGHT },
 	{ 0,                      0,                                                                                  0,                                                       3, 0, 0, 0, 1 },
 	&hudEditorTextFont,       // font
 	CG_HudEditorButton_KeyDown,// keyDown
@@ -674,7 +681,7 @@ static panel_button_t hudEditorComponentsList =
 {
 	NULL,
 	"hudeditor_componentsList",
-	{ 3,                            SCREEN_HEIGHT + 3,SCREEN_WIDTH, SCREEN_HEIGHT_SAFE * 0.25 },
+	{ 3,                            SCREEN_HEIGHT + 6, SCREEN_WIDTH, SCREEN_HEIGHT_SAFE * 0.28 },
 	{ 0,                            0,  0,            0, 0, 0, 0, 1             },
 	&hudEditorFont_Dropdown,        // font
 	CG_HudEditor_ComponentLists_KeyDown,// keyDown
@@ -1919,9 +1926,23 @@ static void CG_HudEditor_Render(panel_button_t *button)
 	{
 		color = &colorYellow;
 	}
-	else if (showAllLayout || (BG_CursorInRect(&button->rect) && !lastFocusComponentMoved))
+	else if (showLayout)
 	{
+		if (showLayout == HUD_SHOW_LAYOUT_VISIBLE_ONLY && !comp->visible)
+		{
+			return;
+		}
+
 		color = comp->visible ? &colorMdGreen : &colorMdRed;
+	}
+	else if (BG_CursorInRect(&button->rect) && !lastFocusComponentMoved)
+	{
+		if (!comp->visible)
+		{
+			return;
+		}
+
+		color = &colorMdGreen;
 	}
 	else
 	{
@@ -2139,7 +2160,7 @@ void CG_HudEditorSetup(void)
 
 	// setup some useful coordinates for the side panel
 	HUDEditorX       = SCREEN_WIDTH_SAFE;
-	HUDEditorWidth   = (HUDEditorX * 1.25f) - HUDEditorX;
+	HUDEditorWidth   = (HUDEditorX * 1.28f) - HUDEditorX;
 	HUDEditorCenterX = HUDEditorX + (HUDEditorWidth * 0.5f);
 
 	for (i = 0, j = 0; hudComponentFields[i].name; i++, j++)
@@ -2247,7 +2268,7 @@ static void CG_DrawHudEditor_ComponentLists(panel_button_t *button)
 
 		y += COMPONENT_BUTTON_HEIGHT + COMPONENT_BUTTON_SPACE_Y;
 
-		if (y + COMPONENT_BUTTON_HEIGHT >= SCREEN_HEIGHT_SAFE + (SCREEN_HEIGHT_SAFE * 0.25f))
+		if (y + COMPONENT_BUTTON_HEIGHT >= button->rect.y + button->rect.h)
 		{
 			y  = button->rect.y;
 			x += w + COMPONENT_BUTTON_SPACE_X;
@@ -2348,7 +2369,13 @@ static int helpStatus = SHOW_ON;
 
 static void CG_HudEditor_ToggleShowLayout(void)
 {
-	showAllLayout = !showAllLayout;
+	switch (showLayout)
+	{
+	case HUD_SHOW_LAYOUT_OFF:          showLayout = HUD_SHOW_LAYOUT_VISIBLE_ONLY; break;
+	case HUD_SHOW_LAYOUT_VISIBLE_ONLY: showLayout = HUD_SHOW_LAYOUT_ALL; break;
+	case HUD_SHOW_LAYOUT_ALL:          showLayout = HUD_SHOW_LAYOUT_OFF; break;
+	default: break;
+	}
 }
 
 static void CG_HudEditor_ToggleHelp(void)
@@ -2406,7 +2433,7 @@ static void CG_HudEditor_HelpDraw(void)
 			{ "K_HOME",              "move from left -> middle -> right" },
 			{ "K_END",               "move from right -> middle -> left" },
 			{ NULL,                  NULL                                },
-			{ "l",                   "show all layout on/off"            },
+			{ "l",                   "show layout visible -> all -> off" },
 			{ "h",                   "help on/off"                       },
 			{ "n",                   "noise generator on/off"            },
 			{ "f",                   "full screen on/off"                },

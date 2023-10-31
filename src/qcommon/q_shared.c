@@ -39,8 +39,6 @@
  * @brief Com_PowerOf2
  * @param[in] x
  * @return
- *
- * @note Unused
  */
 qboolean Com_PowerOf2(int x)
 {
@@ -48,6 +46,55 @@ qboolean Com_PowerOf2(int x)
 	bitsSet = x & (x - 1); /* bitwise trick to check if x is a power of two */
 
 	return (qboolean)(bitsSet == 0);
+}
+
+/**
+ * @brief Com_NextPowerOf2
+ * @param x value to get next power of 2
+ * @return next power of 2 value
+ */
+long Com_NextPowerOf2(long x)
+{
+	long i = 1;
+
+	while (i < x)
+	{
+		i <<= 1;
+	}
+
+	return i;
+	// Could also be made with this but dunno if it's faster
+	// return pow(2, ceil(log(x) / log(2)));
+}
+
+/**
+ * @brief Com_PreviousPowerOf2
+ * @param x value to get previous power of 2
+ * @return previous power of 2 value
+ */
+long Com_PreviousPowerOf2(long x)
+{
+	return Com_NextPowerOf2(x) >> 1;
+}
+
+/**
+ * @brief Com_ClosestPowerOf2
+ * @param x value to get closest power of 2
+ * @return closest power of 2 value
+ */
+long Com_ClosestPowerOf2(long x)
+{
+	long next = Com_NextPowerOf2(x);
+	long prev = Com_PreviousPowerOf2(x);
+
+	if (next - x < x - prev)
+	{
+		return next;
+	}
+	else
+	{
+		return prev;
+	}
 }
 
 /**

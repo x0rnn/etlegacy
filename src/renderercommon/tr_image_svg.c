@@ -80,7 +80,7 @@ qboolean R_LoadSVG(imageData_t *data, byte **pic, int *width, int *height, byte 
 
 	// the svg parser modifies the data, so we need to copy it.
 	// FIXME: look into if there is an update at some point on this..
-	tmp_data = Com_Allocate(data->size + 1);
+	tmp_data = ri.Hunk_AllocateTempMemory(data->size + 1);
 	if (!tmp_data)
 	{
 		Ren_Warning("R_LoadSVG: Could not allocate memory for the svg image.\n");
@@ -88,11 +88,9 @@ qboolean R_LoadSVG(imageData_t *data, byte **pic, int *width, int *height, byte 
 	}
 
 	Com_Memcpy(tmp_data, data->buffer.v, data->size);
-	// we also add one byte to the end since the loaded file does not contain a null terminating byte
-	// FIXME: check if this should be fixed on the file loading level instead of here
 	tmp_data[data->size] = 0;
-	image = nsvgParse((char *)tmp_data, "px", dpi);
-	Com_Dealloc(tmp_data);
+	image                = nsvgParse((char *)tmp_data, "px", dpi);
+	ri.Hunk_FreeTempMemory(tmp_data);
 
 	if (image == NULL)
 	{
@@ -116,6 +114,24 @@ qboolean R_LoadSVG(imageData_t *data, byte **pic, int *width, int *height, byte 
 
 	columns = (int)(image->width * scale);
 	rows    = (int)(image->height * scale);
+
+#ifdef __ANDROID__
+	if (!Com_PowerOf2(columns) || !Com_PowerOf2(rows))
+#else
+	if (!GLEW_ARB_texture_non_power_of_two && (!Com_PowerOf2(columns) || !Com_PowerOf2(rows)))
+#endif
+	{
+		columns = (int)Com_ClosestPowerOf2(columns);
+		scale   = (float)columns / image->width;
+		rows    = (int)(image->height * scale);
+
+		if (!Com_PowerOf2(rows))
+		{
+			scale   = 1.f;
+			columns = (int)image->width;
+			rows    = (int)image->height;
+		}
+	}
 
 	numPixels = columns * rows * 4;
 

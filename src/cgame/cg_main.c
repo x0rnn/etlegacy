@@ -237,7 +237,6 @@ vmCvar_t cg_autoReload;
 vmCvar_t cg_bloodDamageBlend;
 vmCvar_t cg_bloodFlash;
 vmCvar_t cg_bloodFlashTime;
-vmCvar_t cg_drawReinforcementTime;
 vmCvar_t cg_noAmmoAutoSwitch;
 vmCvar_t cg_printObjectiveInfo;
 #ifdef FEATURE_MULTIVIEW
@@ -349,8 +348,6 @@ vmCvar_t cg_drawUnit;
 vmCvar_t cg_visualEffects;
 vmCvar_t cg_bannerTime;
 
-vmCvar_t cg_shoutcastDrawPlayers;
-vmCvar_t cg_shoutcastDrawTeamNames;
 vmCvar_t cg_shoutcastTeamNameRed;
 vmCvar_t cg_shoutcastTeamNameBlue;
 vmCvar_t cg_shoutcastDrawHealth;
@@ -505,7 +502,6 @@ static cvarTable_t cvarTable[] =
 	{ &cg_bloodDamageBlend,         "cg_bloodDamageBlend",         "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_bloodFlash,               "cg_bloodFlash",               "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_bloodFlashTime,           "cg_bloodFlashTime",           "1500",        CVAR_ARCHIVE,                 0 },
-	{ &cg_drawReinforcementTime,    "cg_drawReinforcementTime",    "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_noAmmoAutoSwitch,         "cg_noAmmoAutoSwitch",         "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_printObjectiveInfo,       "cg_printObjectiveInfo",       "1",           CVAR_ARCHIVE,                 0 },
 #ifdef FEATURE_MULTIVIEW
@@ -618,8 +614,6 @@ static cvarTable_t cvarTable[] =
 	{ &cg_visualEffects,            "cg_visualEffects",            "1",           CVAR_ARCHIVE,                 0 }, // Draw visual effects (i.e : airstrike plane, debris ...)
 	{ &cg_bannerTime,               "cg_bannerTime",               "10000",       CVAR_ARCHIVE,                 0 },
 
-	{ &cg_shoutcastDrawPlayers,     "cg_shoutcastDrawPlayers",     "1",           CVAR_ARCHIVE,                 0 },
-	{ &cg_shoutcastDrawTeamNames,   "cg_shoutcastDrawTeamNames",   "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_shoutcastTeamNameRed,     "cg_shoutcastTeamNameRed",     "Axis",        CVAR_ARCHIVE,                 0 },
 	{ &cg_shoutcastTeamNameBlue,    "cg_shoutcastTeamNameBlue",    "Allies",      CVAR_ARCHIVE,                 0 },
 	{ &cg_shoutcastDrawHealth,      "cg_shoutcastDrawHealth",      "0",           CVAR_ARCHIVE,                 0 },

@@ -667,6 +667,9 @@ MATHLIB
 //=============================================
 
 qboolean Com_PowerOf2(int x);
+long Com_NextPowerOf2(long x);
+long Com_PreviousPowerOf2(long x);
+long Com_ClosestPowerOf2(long x);
 
 #define Com_ByteClamp(x) (((x) < 0) ? 0 : ((x) > 255) ? 255 : (x))
 #define Com_Clamp(min, max, value) (((value) < (min)) ? (min) : ((value) > (max)) ? (max) : (value))
@@ -1860,7 +1863,8 @@ typedef enum
 
 	DS_WAITINGPLAYBACK, ///< demo will play after map_restart)
 	DS_PLAYBACK,        ///< a demo is playing
-	DS_WAITINGSTOP,     ///< demo is stopped but we must move clients over their normal slots
+	DS_RESTART,         ///< demo is restarting (so all cvar changes are applied)
+	DS_ERROR,           ///< error occured
 
 	DS_RECORDING,       ///< a demo is being recorded
 

@@ -1887,9 +1887,9 @@ void ClientUserinfoChanged(int clientNum)
 		if (cs_cg_uinfo[0])
 		{
 			Q_sscanf(cs_cg_uinfo, "%u %u %u",
-			       &client->pers.clientFlags,
-			       &client->pers.clientTimeNudge,
-			       &client->pers.clientMaxPackets);
+			         &client->pers.clientFlags,
+			         &client->pers.clientTimeNudge,
+			         &client->pers.clientMaxPackets);
 		}
 		else
 		{
@@ -2040,7 +2040,7 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 	char reason[MAX_STRING_CHARS] = "";
 #endif
 	qboolean allowGeoIP = qtrue;
-	int      i;
+	int      i, tv      = 0;
 
 	trap_GetUserinfo(clientNum, userinfo, sizeof(userinfo));
 
@@ -2061,6 +2061,12 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 		if (!Q_stricmp(cs_key, "cg_allowGeoIP") && cs_value[0])
 		{
 			allowGeoIP = cs_value[0] >= '1' ? qtrue : qfalse;
+			continue;
+		}
+
+		if (!Q_stricmp(cs_key, "tv"))
+		{
+			tv = Q_atoi(cs_value);
 			continue;
 		}
 
@@ -2322,6 +2328,10 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 		ent->r.svFlags |= SVF_BOT;
 		ent->inuse      = qtrue;
 
+		if (tv & 1)
+		{
+			level.demoClientBotNum = clientNum;
+		}
 	}
 	else if (firstTime)
 	{
@@ -2349,7 +2359,10 @@ char *ClientConnect(int clientNum, qboolean firstTime, qboolean isBot)
 	G_LogPrintf("ClientConnect: %i\n", clientNum);
 
 #ifdef FEATURE_OMNIBOT
-	Bot_Event_ClientConnected(clientNum, isBot);
+	if (!(tv & 1))
+	{
+		Bot_Event_ClientConnected(clientNum, isBot);
+	}
 #endif
 
 	G_UpdateCharacter(client);
@@ -2811,6 +2824,10 @@ void ClientSpawn(gentity_t *ent, qboolean revived, qboolean teamChange, qboolean
 	int                savedPing;
 	int                savedTeam;
 	int                savedDeathTime;
+	int                oldWeapon, oldNextWeapon, oldWeaponstate, oldSilencedSideArm;
+	int                oldAmmo[MAX_WEAPONS];                          // total amount of ammo
+	int                oldAmmoclip[MAX_WEAPONS];                      // ammo in clip
+	int                oldWeapons[MAX_WEAPONS / (sizeof(int) * 8)];   // 64 bits for weapons held
 
 	client->pers.lastSpawnTime            = level.time;
 	client->pers.lastBattleSenseBonusTime = level.timeCurrent;
@@ -2881,6 +2898,18 @@ void ClientSpawn(gentity_t *ent, qboolean revived, qboolean teamChange, qboolean
 	savedPing      = client->ps.ping;
 	savedTeam      = client->ps.teamNum;
 	savedDeathTime = client->deathTime;
+
+	if (revived)
+	{
+		oldWeapon          = client->ps.weapon;
+		oldNextWeapon      = client->ps.nextWeapon;
+		oldWeaponstate     = client->ps.weaponstate;
+		oldSilencedSideArm = client->pmext.silencedSideArm;
+
+		Com_Memcpy(oldAmmo, client->ps.ammo, sizeof(int) * MAX_WEAPONS);
+		Com_Memcpy(oldAmmoclip, client->ps.ammoclip, sizeof(int) * MAX_WEAPONS);
+		Com_Memcpy(oldWeapons, client->ps.weapons, sizeof(int) * (MAX_WEAPONS / (sizeof(int) * 8)));
+	}
 
 	for (i = 0 ; i < MAX_PERSISTANT ; i++)
 	{
@@ -3100,10 +3129,47 @@ void ClientSpawn(gentity_t *ent, qboolean revived, qboolean teamChange, qboolean
 	// increases stats[STAT_MAX_HEALTH] based on # of medics in game
 	AddMedicTeamBonus(client);
 
-	if (!revived)
+	if (revived)
 	{
-		client->pers.cmd.weapon = ent->client->ps.weapon;
+		Com_Memcpy(client->ps.ammo, oldAmmo, sizeof(int) * MAX_WEAPONS);
+		Com_Memcpy(client->ps.ammoclip, oldAmmoclip, sizeof(int) * MAX_WEAPONS);
+		Com_Memcpy(client->ps.weapons, oldWeapons, sizeof(int) * (MAX_WEAPONS / (sizeof(int) * 8)));
+
+		// if we were in the middle of switching to alt weapon switch to it
+		if (oldWeapon == GetWeaponTableData(oldNextWeapon)->weapAlts)
+		{
+			client->ps.weapon = oldNextWeapon;
+		}
+		else
+		{
+			if (COM_BitCheck(client->ps.weapons, oldWeapon))
+			{
+				client->ps.weapon = oldWeapon;
+			}
+			else if (COM_BitCheck(client->ps.weapons, client->pers.cmd.weapon))
+			{
+				// if the oldWeapon was removed right before death switch to weapon client requested
+				// only client knows the right weapon to switch to if equipped weapon was removed
+				// common when throwing last grenade
+				client->ps.weapon = client->pers.cmd.weapon;
+			}
+
+			client->pmext.silencedSideArm = oldSilencedSideArm;
+		}
+
+		// cgame's prevent the flying nade effect (best visible with M7 when swapping while raising)
+		if (BG_simpleWeaponState(oldWeaponstate) == WSTATE_SWITCH)
+		{
+			client->ps.nextWeapon = client->ps.weapon;
+		}
+		else
+		{
+			client->ps.nextWeapon = oldNextWeapon;
+		}
 	}
+
+	// client has (almost) no say in weapon selection when spawning
+	client->pers.cmd.weapon = client->ps.weapon;
 
 	// ***NOTE*** the following line is order-dependent and must *FOLLOW* SetWolfSpawnWeapons() in multiplayer
 	// AddMedicTeamBonus() now adds medic team bonus and stores in ps.stats[STAT_MAX_HEALTH].
