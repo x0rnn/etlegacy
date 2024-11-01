@@ -300,6 +300,7 @@ void Cmd_Exec_f(void)
 	qboolean quiet;
 
 	quiet = !Q_stricmp(Cmd_Argv(0), "execq");
+	f.v   = NULL;
 
 	if (Cmd_Argc() != 2)
 	{
@@ -457,7 +458,7 @@ char *Cmd_Args(void)
 		Q_strcat(cmd_args, MAX_STRING_CHARS, cmd_argv[i]);
 		if (i != cmd_argc - 1)
 		{
-			strcat(cmd_args, " ");
+			Q_strcat(cmd_args, sizeof(cmd_args), " ");
 		}
 	}
 
@@ -484,7 +485,7 @@ char *Cmd_ArgsFrom(int arg)
 		Q_strcat(cmd_args, BIG_INFO_STRING, cmd_argv[i]);
 		if (i != cmd_argc - 1)
 		{
-			strcat(cmd_args, " ");
+			Q_strcat(cmd_args, sizeof(cmd_args), " ");
 		}
 	}
 
@@ -523,7 +524,7 @@ char *Cmd_ArgsFromTo(int arg, int max)
 		Q_strcat(cmd_args, BIG_INFO_STRING, cmd_argv[i]);
 		if (i != max - 1)
 		{
-			strcat(cmd_args, " ");
+			Q_strcat(cmd_args, sizeof(cmd_args), " ");
 		}
 	}
 
@@ -574,6 +575,22 @@ void Cmd_Args_Sanitize(void)
 			++c;
 		}
 	}
+}
+
+/**
+ * @brief Creates a single token string.
+ * @param[in] text_in
+ */
+void Cmd_SingleTokenString(const char *text_in)
+{
+	// clear previous args
+	cmd_argc = 0;
+	if (text_in)
+	{
+		Q_strncpyz(cmd_cmd, text_in, sizeof(cmd_cmd));
+		cmd_argv[0] = cmd_cmd;
+	}
+	cmd_argc = text_in != NULL;
 }
 
 /**

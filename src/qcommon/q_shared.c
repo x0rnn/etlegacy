@@ -1150,12 +1150,14 @@ void SkipRestOfLine(char **data)
 
 /**
  * @brief Parse value and key from the string
- * @param buf_p
- * @param key
- * @param value
- * @param separator
+ * @param[in,out] buf_p
+ * @param[out] key
+ * @param[out] value
+ * @param[in] separator
  * @return true if key&value is valid
- */
+ *
+ * @note Unused
+ *
 qboolean ParseKeyValue(char **buf_p, char *key, char *value, char separator)
 {
 	char   *token;
@@ -1195,7 +1197,7 @@ qboolean ParseKeyValue(char **buf_p, char *key, char *value, char separator)
 
 	return qtrue;
 }
-
+*/
 
 /**
  * @brief Parse1DMatrix
@@ -1573,6 +1575,7 @@ int Q_vsnprintf(char *str, size_t size, const char *format, va_list args)
  */
 void Q_strncpyz(char *dest, const char *src, size_t destsize)
 {
+	etl_assert(dest && src && destsize > 0 && dest != src);
 	if (!dest)
 	{
 		Com_Error(ERR_FATAL, "Q_strncpyz: NULL dest");
@@ -1757,6 +1760,7 @@ char *Q_strupr(char *s1)
 void Q_strcat(char *dest, size_t size, const char *src)
 {
 	size_t l1;
+	etl_assert(dest && src && size > 0 && dest != src);
 
 	l1 = strlen(dest);
 	if (l1 >= size)
@@ -2017,6 +2021,22 @@ void Q_ColorizeString(char colorCode, const char *inStr, char *outStr, size_t ou
 	}
 
 	outStr[outOffset] = 0;
+}
+
+int Q_StringEndsWith(const char *str, const char *suffix)
+{
+	size_t len_str, len_suffix;
+	if (!str || !suffix)
+	{
+		return 0;
+	}
+	len_str    = strlen(str);
+	len_suffix = strlen(suffix);
+	if (len_suffix > len_str)
+	{
+		return 0;
+	}
+	return strncmp(str + len_str - len_suffix, suffix, len_suffix) == 0;
 }
 
 // Colors table (Only used locally)
@@ -2583,9 +2603,7 @@ qboolean Info_RemoveKey(char *s, const char *key)
 
 		if (!Q_stricmp(key, pkey))
 		{
-			// rain - arguments to strcpy must not overlap
-			//strcpy (start, s);    // remove this part
-			memmove(start, s, strlen(s) + 1);     // remove this part
+			memmove(start, s, strlen(s) + 1);     // TODO: remove this part ... why ?
 			return qtrue;
 		}
 
@@ -2728,7 +2746,7 @@ void Info_SetValueForKey(char *s, const char *key, const char *value)
 		return;
 	}
 
-	strcat(s, newi);
+	Q_strcat(s, MAX_INFO_STRING, newi);
 }
 
 /**
@@ -2779,7 +2797,7 @@ void Info_SetValueForKey_Big(char *s, const char *key, const char *value)
 		return;
 	}
 
-	strcat(s, newi);
+	Q_strcat(s, BIG_INFO_STRING, newi);
 }
 
 /**
@@ -3048,17 +3066,21 @@ float Com_RoundFloatWithNDecimal(float value, unsigned int decimalCount)
 }
 
 /**
- * @brief Shortens a values by thousands and keeping wanted decimal values (i.e  "4560000" to "4.56M")
+ * @brief Shortens a values by thousand, keeping wanted decimal values and sleepding at some
+ * @details (i.e) decimalCount = 2 splitAtIntCount = 3 : "4560000" to "4.56M"
+ * decimalCount = 1 splitAtIntCount = 4 : "7890" to "7890"
+ * decimalCount = 1 splitAtIntCount = 4 : "12340" to "12.3k"
  * @param[in] value The number to shorten
  * @param[in] decimalCount The number of decimal to be displayed
+ * @param[in] splitAtIntCount number of integer we want to start to split the value
  * @return Down scaled value string with suffixed unit
  */
-char *Com_ScaleNumberPerThousand(float value, unsigned int decimalCount)
+char *Com_ScaleNumberPerThousand(float value, unsigned int decimalCount, unsigned int splitAtIntCount)
 {
 	static const char *units[] = { "", "k", "M", "G", "T" };
 	unsigned int      i        = 0;
 
-	while (value > 1000 && i < sizeof(units))
+	while (value > pow(10.f, splitAtIntCount) && i < ARRAY_LEN(units))
 	{
 		value /= 1000;
 		++i;
@@ -3126,4 +3148,18 @@ float Q_IntToFloat(int32_t i)
 
 	fi.i = i;
 	return fi.f;
+}
+
+/**
+ * @brief Q_ParseInt Parse string to int and check if the string was numeric
+ * @param[in] src String to parse
+ * @param[in,out] out Parsed int
+ * @return qtrue if the src string is numeric
+ */
+qboolean Q_ParseInt(const char *src, int *out)
+{
+	char *end;
+
+	*out = (int)strtol(src, &end, 10);
+	return !*end;
 }

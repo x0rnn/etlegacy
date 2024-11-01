@@ -44,6 +44,8 @@ static ext_trap_keys_t cg_extensionTraps[] =
 {
 	{ "trap_SysFlashWindow_Legacy",  CG_SYS_FLASH_WINDOW, qfalse },
 	{ "trap_CommandComplete_Legacy", CG_COMMAND_COMPLETE, qfalse },
+	{ "trap_CmdBackup_Ext_Legacy",   CG_CMDBACKUP_EXT,    qfalse },
+	{ "trap_MatchPaused_Legacy",     CG_MATCHPAUSED,      qfalse },
 	{ NULL,                          -1,                  qfalse }
 };
 
@@ -89,12 +91,12 @@ qboolean CL_GetUserCmd(int cmdNumber, usercmd_t *ucmd)
 
 	// the usercmd has been overwritten in the wrapping
 	// buffer because it is too far out of date
-	if (cmdNumber <= cl.cmdNumber - CMD_BACKUP)
+	if (cmdNumber <= cl.cmdNumber - cl.cmdBackup)
 	{
 		return qfalse;
 	}
 
-	*ucmd = cl.cmds[cmdNumber & CMD_MASK];
+	*ucmd = cl.cmds[cmdNumber & cl.cmdMask];
 
 	return qtrue;
 }
@@ -205,6 +207,57 @@ qboolean CL_GetSnapshot(int snapshotNumber, snapshot_t *snapshot)
 	// FIXME: configstring changes and server commands!!!
 
 	return qtrue;
+}
+
+extern cvar_t *sv_fps;
+
+/**
+ * @brief CL_InterpolationCheckRange
+ */
+static void CL_InterpolationCheckRange(void)
+{
+	int snaps, updateRate, buffer;
+
+	if (!cl_interpolation->integer)
+	{
+		return;
+	}
+
+	snaps      = Cvar_VariableValue("snaps");
+	updateRate = snaps < sv_fps->integer ? 1000 / snaps : 1000 / sv_fps->integer;
+	buffer     = (FRAMETIME / 2) / updateRate - 1;
+
+	if (cl_interpolation->integer > buffer)
+	{
+		Com_Printf(S_COLOR_YELLOW "WARNING: cvar '%s' is over allowed buffer (%d > %d), setting to %d\n", cl_interpolation->name, cl_interpolation->integer, buffer, buffer);
+		Cvar_SetValue(cl_interpolation->name, buffer);
+	}
+}
+
+/**
+ * @brief CL_SetSnapshotLerp
+ */
+void CL_SetSnapshotLerp(void)
+{
+	int i = 0, snapshotNumber = cl.snap.messageNum;
+
+	CL_InterpolationCheckRange();
+
+	while (i < cl_interpolation->integer)
+	{
+		if (cl.snapshots[--snapshotNumber & PACKET_MASK].valid)
+		{
+			i++;
+		}
+
+		// wrapped around
+		if (cl.snapshots[snapshotNumber & PACKET_MASK].messageNum == cl.snap.messageNum)
+		{
+			break;
+		}
+	}
+
+	cl.snapLerp = cl.snapshots[snapshotNumber & PACKET_MASK];
 }
 
 /**
@@ -379,7 +432,7 @@ rescan:
 		// allow server to indicate why they were disconnected
 		if (argc >= 2)
 		{
-			Com_Error(ERR_SERVERDISCONNECT, "%s", va("Server Disconnected - %s", Cmd_Argv(1)));
+			Com_Error(ERR_SERVERDISCONNECT, "Server Disconnected - %s", Cmd_Argv(1));
 		}
 		else
 		{
@@ -416,7 +469,7 @@ rescan:
 		{
 			Com_Error(ERR_DROP, "bcs exceeded BIG_INFO_STRING");
 		}
-		strcat(bigConfigString, s);
+		Q_strcat(bigConfigString, sizeof(bigConfigString), s);
 		return qfalse;
 	}
 
@@ -427,8 +480,8 @@ rescan:
 		{
 			Com_Error(ERR_DROP, "bcs exceeded BIG_INFO_STRING");
 		}
-		strcat(bigConfigString, s);
-		strcat(bigConfigString, "\"");
+		Q_strcat(bigConfigString, sizeof(bigConfigString), s);
+		Q_strcat(bigConfigString, sizeof(bigConfigString), "\"");
 		s = bigConfigString;
 		goto rescan;
 	}
@@ -1068,6 +1121,14 @@ intptr_t CL_CgameSystemCalls(intptr_t *args)
 		Field_CompleteModSuggestion(VMA(1));
 		return 0;
 
+	case CG_CMDBACKUP_EXT:
+		cl.cmdBackup = CMD_BACKUP_ETL;
+		cl.cmdMask   = CMD_MASK_ETL;
+		return 0;
+	case CG_MATCHPAUSED:
+		S_PauseSounds(args[1]);
+		return 0;
+
 	default:
 		Com_Error(ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0]);
 		break;
@@ -1303,6 +1364,10 @@ int clFrameTime;
  */
 int CL_FindIncrementThreshold(void)
 {
+	int LCM;
+	int min;
+	int clTime;
+
 	clFrameTime = cls.frametime;
 
 	// handles zero duration between frames (often happens on map change)
@@ -1313,7 +1378,7 @@ int CL_FindIncrementThreshold(void)
 
 	// calculates the least common multiple of clFrameTime and svFrameTime
 	// the LCM represents how long until the time over-run pattern repeats
-	int LCM = svFrameTime > clFrameTime ? svFrameTime : clFrameTime;
+	LCM = svFrameTime > clFrameTime ? svFrameTime : clFrameTime;
 	while (1)
 	{
 		if (LCM % clFrameTime == 0 && LCM % svFrameTime == 0)
@@ -1323,8 +1388,8 @@ int CL_FindIncrementThreshold(void)
 		++LCM;
 	}
 
-	int min    = 0;
-	int clTime = 0;
+	min    = 0;
+	clTime = 0;
 	// finds the worst amount of client over-run assuming no initial spare time
 	while (clTime <= LCM)
 	{
@@ -1343,8 +1408,6 @@ int CL_FindIncrementThreshold(void)
 
 #define RESET_TIME  500
 #define HALVE_TIME  100
-
-extern cvar_t *sv_fps;
 
 /**
  * @brief Adjust the clients view of server time.
@@ -1376,14 +1439,14 @@ void CL_AdjustTimeDelta(void)
 		return;
 	}
 
-	newDelta   = cl.snap.serverTime - cls.realtime;
+	newDelta   = cl.snapLerp.serverTime - cls.realtime;
 	deltaDelta = abs(newDelta - cl.serverTimeDelta);
 
 	if (deltaDelta > RESET_TIME)
 	{
 		cl.baselineDelta = cl.serverTimeDelta = newDelta;
-		cl.oldServerTime = cl.snap.serverTime;   // FIXME: is this a problem for cgame?
-		cl.serverTime    = cl.snap.serverTime;
+		cl.oldServerTime = cl.snapLerp.serverTime;   // FIXME: is this a problem for cgame?
+		cl.serverTime    = cl.snapLerp.serverTime;
 
 		if (cl_showTimeDelta->integer)
 		{
@@ -1424,6 +1487,7 @@ void CL_AdjustTimeDelta(void)
 			else
 			{
 				int svOldFrameTime = svFrameTime;
+				int spareTime;
 
 				if (com_sv_running->integer)
 				{
@@ -1432,8 +1496,8 @@ void CL_AdjustTimeDelta(void)
 				else
 				{
 					// must be done this way to avoid incorrect svFrameTime when on a slow client
-					svFrameTime = (cl.snapshots[(cl.snap.messageNum - 0) & PACKET_MASK].serverTime)
-					              - (cl.snapshots[(cl.snap.messageNum - 1) & PACKET_MASK].serverTime);
+					svFrameTime = (cl.snapshots[(cl.snapLerp.messageNum - 0) & PACKET_MASK].serverTime)
+					              - (cl.snapshots[(cl.snapLerp.messageNum - 1) & PACKET_MASK].serverTime);
 				}
 
 				// find the new threshold if not set or client/server frametime has changed
@@ -1442,8 +1506,8 @@ void CL_AdjustTimeDelta(void)
 					threshold = CL_FindIncrementThreshold();
 				}
 
-				int spareTime =
-					cl.snap.serverTime                    // server time
+				spareTime =
+					cl.snapLerp.serverTime                // server time
 					- (cls.realtime + cl.serverTimeDelta) // client time
 					- cl_extrapolationMargin->integer;    // margin time
 
@@ -1499,9 +1563,9 @@ void CL_FirstSnapshot(void)
 	cls.state = CA_ACTIVE;
 
 	// set the timedelta so we are exactly on this first frame
-	cl.baselineDelta      = cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
-	cl.oldServerTime      = cl.snap.serverTime;
-	clc.demo.timeBaseTime = cl.snap.serverTime;
+	cl.baselineDelta               = cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
+	cl.oldServerTime               = cl.snap.serverTime;
+	clc.demo.timedemo.timeBaseTime = cl.snap.serverTime;
 
 	// if this is the first frame of active play,
 	// execute the contents of activeAction now
@@ -1602,6 +1666,7 @@ void CL_SetCGameTime(void)
 		// or less latency to be added in the interest of better
 		// smoothness or better responsiveness.
 		int tn = cl_timeNudge->integer;
+		int spareTime;
 
 		if (tn < -30)
 		{
@@ -1625,8 +1690,8 @@ void CL_SetCGameTime(void)
 		// note if we are almost past the latest frame (without timeNudge),
 		// so we will try and adjust back a bit when the next snapshot arrives
 
-		int spareTime =
-			cl.snap.serverTime                     //server
+		spareTime =
+			cl.snapLerp.serverTime                 //server
 			- (cls.realtime + cl.serverTimeDelta); //client
 
 		if (spareTime <= cl_extrapolationMargin->integer)
@@ -1683,14 +1748,13 @@ void CL_SetCGameTime(void)
  * @param[in] orientation
  * @return
  *
- * @note Unused
+ */
 qboolean CL_GetTag(int clientNum, char *tagname, orientation_t *orientation)
 {
-    if (!cgvm)
-    {
-        return qfalse;
-    }
+	if (!cgvm)
+	{
+		return qfalse;
+	}
 
-    return VM_Call(cgvm, CG_GET_TAG, clientNum, tagname, orientation);
+	return VM_Call(cgvm, CG_GET_TAG, clientNum, tagname, orientation);
 }
-*/

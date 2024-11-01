@@ -39,6 +39,7 @@
 
 #ifndef DEDICATED
 #include "../sys/sys_local.h"
+#include "../sdl/sdl_defs.h"
 #include "../client/client.h"
 #endif
 #include "../server/server.h"
@@ -115,6 +116,8 @@ cvar_t *com_timescale;
 cvar_t *com_fixedtime;
 cvar_t *com_journal;
 cvar_t *com_maxfps;
+cvar_t *com_maxfpsUnfocused;
+cvar_t *com_maxfpsMinimized;
 cvar_t *com_timedemo;
 cvar_t *com_sv_running;
 cvar_t *com_cl_running;
@@ -178,6 +181,7 @@ char com_errorMessage[MAX_PRINT_MSG];
 
 void Com_WriteConfig_f(void);
 void CIN_CloseAllVideos(void);
+static void Com_VersionInfo_f(void);
 
 //============================================================================
 
@@ -220,7 +224,7 @@ void Com_EndRedirect(void)
 }
 
 /**
- * @brief Both client and server can use this, and it will output to the apropriate place.
+ * @brief Both client and server can use this, and it will output to the appropriate place.
  *
  * A raw string should NEVER be passed as fmt, because of "%f" type crashers.
  *
@@ -245,7 +249,7 @@ void QDECL Com_Printf(const char *fmt, ...)
 	msg = buffer + Com_sprintf(buffer, sizeof(buffer), "%8i ", timestamp);
 
 	va_start(argptr, fmt);
-	bufferEnd = msg + Q_vsnprintf(msg, sizeof(buffer), fmt, argptr);
+	bufferEnd = msg + Q_vsnprintf(msg, sizeof(buffer) - (msg - buffer), fmt, argptr);
 	va_end(argptr);
 
 	if (rd_buffer)
@@ -266,7 +270,7 @@ void QDECL Com_Printf(const char *fmt, ...)
 	tmpMsg = Q_Extended_To_UTF8(msg);
 	if (tmpMsg != msg)
 	{
-		strcpy(msg, tmpMsg);
+		Q_strncpyz(msg, tmpMsg, sizeof(buffer) - (msg - buffer));
 	}
 
 	// echo to console if we're not a dedicated server
@@ -516,7 +520,7 @@ void Com_ParseCommandLine(char *commandLine)
 			inq = !inq;
 		}
 		// look for a + separating character
-		// if commandLine came from a file, we might have real line seperators
+		// if commandLine came from a file, we might have real line separators
 		if (*commandLine == '+' || *commandLine == '\n' || *commandLine == '\r')
 		{
 			if (com_numConsoleLines == MAX_CONSOLE_LINES)
@@ -617,6 +621,21 @@ void Com_StartupVariable(const char *match)
 				Cvar_Set2(s, Cmd_ArgsFrom(2), qfalse);
 			}
 		}
+	}
+}
+
+void Com_CommandLineCheck(qboolean (*clb)())
+{
+	int i;
+
+	for (i = 0 ; i < com_numConsoleLines ; i++)
+	{
+		Cmd_TokenizeString(com_consoleLines[i]);
+		if (!(*clb)())
+		{
+			continue;
+		}
+		com_consoleLines[i][0] = 0;
 	}
 }
 
@@ -1439,7 +1458,7 @@ char *CopyString(const char *in)
 	}
 	len = strlen(in) + 1;
 	out = S_Malloc(len);
-	strncpy(out, in, len);
+	Q_strncpyz(out, in, len);
 	return out;
 }
 
@@ -2326,7 +2345,8 @@ sysEvent_t Com_GetSystemEvent(void)
 
 		len = strlen(s) + 1;
 		b   = Z_Malloc(len);
-		strcpy(b, s);
+
+		Q_strncpyz(b, s, len);
 		Com_QueueEvent(0, SE_CONSOLE, 0, 0, len, b);
 	}
 
@@ -2464,7 +2484,7 @@ sysEvent_t Com_GetEvent(void)
  * @param[in] evFrom
  * @param[in] buf
  */
-void Com_RunAndTimeServerPacket(netadr_t *evFrom, msg_t *buf)
+void Com_RunAndTimeServerPacket(const netadr_t *evFrom, msg_t *buf)
 {
 	int t1 = 0;
 
@@ -2473,7 +2493,7 @@ void Com_RunAndTimeServerPacket(netadr_t *evFrom, msg_t *buf)
 		t1 = Sys_Milliseconds();
 	}
 
-	SV_PacketEvent(*evFrom, buf);
+	SV_PacketEvent(evFrom, buf);
 
 	if (com_speeds->integer)
 	{
@@ -2513,7 +2533,7 @@ int Com_EventLoop(void)
 			// manually send packet events for the loopback channel
 			while (NET_GetLoopPacket(NS_CLIENT, &evFrom, &buf))
 			{
-				CL_PacketEvent(evFrom, &buf);
+				CL_PacketEvent(&evFrom, &buf);
 			}
 
 			while (NET_GetLoopPacket(NS_SERVER, &evFrom, &buf))
@@ -2766,6 +2786,16 @@ static void Com_DetectAltivec(void)
 }
 #endif
 
+static qboolean Com_InitExecs()
+{
+	if (Q_stricmp(Cmd_Argv(0), "exec") && Q_stricmp(Cmd_Argv(0), "execq"))
+	{
+		return qfalse;
+	}
+	Cbuf_AddText(va("%s\n", Cmd_ArgsFrom(0)));
+	return qtrue;
+}
+
 /**
  * @brief Com_Init
  * @param[in] commandLine
@@ -2918,6 +2948,8 @@ void Com_Init(char *commandLine)
 
 	Cbuf_AddText("exec autoexec.cfg\n");
 
+	Com_CommandLineCheck(&Com_InitExecs);
+
 	// reset crashed state
 	Cbuf_AddText("set com_crashed 0\n");
 
@@ -2944,6 +2976,13 @@ void Com_Init(char *commandLine)
 	//
 	// no need to latch this in ET, our recoil is framerate independant
 	com_maxfps = Cvar_Get("com_maxfps", "125", CVAR_ARCHIVE /*|CVAR_LATCH*/);
+	Cvar_CheckRange(com_maxfps, 20, 500, qtrue);
+
+	com_maxfpsUnfocused = Cvar_Get("com_maxfpsUnfocused", "-1", CVAR_ARCHIVE);
+	Cvar_CheckRange(com_maxfpsUnfocused, -1, 500, qtrue);
+
+	com_maxfpsMinimized = Cvar_Get("com_maxfpsMinimized", "-1", CVAR_ARCHIVE);
+	Cvar_CheckRange(com_maxfpsMinimized, -1, 500, qtrue);
 
 	com_developer = Cvar_Get("developer", "0", CVAR_TEMP);
 	com_logfile   = Cvar_Get("logfile", "0", CVAR_TEMP);
@@ -3019,6 +3058,7 @@ void Com_Init(char *commandLine)
 		Cmd_AddCommand("sql", DB_ExecSQLCommand_f, "Executes an sql command.");
 	}
 #endif
+	Cmd_AddCommand("versionInfo", Com_VersionInfo_f, "Print out the version information of the binary.");
 
 	com_version = Cvar_Get("version", FAKE_VERSION, CVAR_ROM | CVAR_SERVERINFO);
 
@@ -3200,6 +3240,18 @@ void Com_WriteConfig_f(void)
 	Com_WriteConfigToFile(filename, nodefaults);
 }
 
+static void Com_VersionInfo_f(void)
+{
+#ifdef DEDICATED
+	Com_Printf(Q3_VERSION " " CPUSTRING " dedicated server (%s)\n", __DATE__);
+#else
+	Com_Printf("Client: " ET_VERSION "\n");
+	Com_Printf("Masked as: " FAKE_VERSION "\n");
+#endif
+	Com_Printf("Built: " PRODUCT_BUILD_TIME "\n");
+	Com_Printf("Build features: " PRODUCT_BUILD_FEATURES "\n");
+}
+
 /**
  * @brief Com_ModifyMsec
  * @param[in] msec
@@ -3327,7 +3379,7 @@ int Com_TimeVal(int minMsec)
  */
 void Com_Frame(void)
 {
-	int        msec, minMsec;
+	int        msec, minMsec = 0;
 	int        timeVal, timeValSV;
 	static int lastTime = 0, bias = 0;
 	int        timeBeforeFirstEvents;
@@ -3358,11 +3410,6 @@ void Com_Frame(void)
 		timeBeforeFirstEvents = Sys_Milliseconds();
 	}
 
-	if (!com_dedicated->integer && !com_timedemo->integer && !com_developer->integer)
-	{
-		Cvar_CheckRange(com_maxfps, 20, 333, qtrue);
-	}
-
 	// we may want to spin here if things are going too fast
 	// Figure out how much time we have
 	if (!com_timedemo->integer)
@@ -3373,23 +3420,45 @@ void Com_Frame(void)
 		}
 		else
 		{
-			if (com_minimized->integer && !Cvar_VariableString("cl_downloadName")[0] // don't set different minMsec while downloading
-			    && Cvar_VariableIntegerValue("cl_demorecording") == 0) // don't set different minMsec while recording
+			if (
+				com_minimized->integer
+				&& !Cvar_VariableString("cl_downloadName")[0]          // don't set different minMsec while downloading
+				&& Cvar_VariableIntegerValue("cl_demorecording") == 0  // don't set different minMsec while recording
+				)
 			{
-				minMsec = 100; // = 1000/10;
+				if (com_maxfpsMinimized->integer < 0)  // default
+				{
+					minMsec = 100; // = 1000/10;
+				}
+				else if (com_maxfpsMinimized->integer > 0)
+				{
+					minMsec = 1000 / com_maxfpsMinimized->integer;
+				}
 			}
-			else if (com_unfocused->integer && com_maxfps->integer > 1 && !Cvar_VariableString("cl_downloadName")[0]  // don't set different minMsec while downloading
-			         && Cvar_VariableIntegerValue("cl_demorecording") == 0) // don't set different minMsec while recording
+			else if (
+				com_unfocused->integer
+				&& !Cvar_VariableString("cl_downloadName")[0]          // don't set different minMsec while downloading
+				&& Cvar_VariableIntegerValue("cl_demorecording") == 0  // don't set different minMsec while recording
+				)
 			{
-				minMsec = 1000 / (com_maxfps->integer / 2);
+				if (com_maxfpsUnfocused->integer < 0)  // default
+				{
+					minMsec = 1000 / (com_maxfps->integer / 2);
+				}
+				else if (com_maxfpsUnfocused->integer > 0)
+				{
+					minMsec = 1000 / com_maxfpsUnfocused->integer;
+				}
 			}
-			else if (com_maxfps->integer > 0)
-			{
-				minMsec = 1000 / com_maxfps->integer;
-			}
-			else
+			else if (com_maxfps->integer < 0)
 			{
 				minMsec = 1;
+			}
+
+			// fallback to com_maxfps
+			if (minMsec == 0)
+			{
+				minMsec = 1000 / com_maxfps->integer;
 			}
 
 			timeVal = com_frameTime - lastTime;

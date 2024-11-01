@@ -66,9 +66,9 @@ If 0, then only addresses matching the list will be allowed.  This lets you easi
 TTimo NOTE: GUID functions are copied over from the model of IP banning,
 used to enforce max lives independently from server reconnect and team changes (Xian)
 
-TTimo NOTE: for persistence, bans are stored in g_banIPs cvar MAX_CVAR_VALUE_STRING
+TTimo NOTE: for persistence, bans are stored in tvg_banIPs cvar MAX_CVAR_VALUE_STRING
 The size of the cvar string buffer is limiting the banning to around 20 masks
-this could be improved by putting some g_banIPs2 g_banIps3 etc. maybe
+this could be improved by putting some tvg_banIPs2 tvg_banIps3 etc. maybe
 still, you should rely on PB for banning instead
 ==============================================================================
 */
@@ -88,10 +88,6 @@ typedef struct ipFilterList_s
 } ipFilterList_t;
 
 static ipFilterList_t ipFilters;
-static ipFilterList_t ipMaxLivesFilters;
-
-static ipGUID_t guidMaxLivesFilters[MAX_IPFILTERS];
-static int      numMaxLivesFilters = 0;
 
 /**
  * @brief StringToFilter
@@ -158,8 +154,8 @@ static qboolean StringToFilter(const char *s, ipFilter_t *f)
  */
 static void UpdateIPBans(ipFilterList_t *ipFilterList)
 {
-	byte b[4];
-	byte m[4];
+	byte b[4] = { 0 };
+	byte m[4] = { 0 };
 	int  i, j;
 	char iplist_final[MAX_CVAR_VALUE_STRING];
 	char ip[64];
@@ -236,11 +232,11 @@ qboolean G_FilterPacket(ipFilterList_t *ipFilterList, char *from)
 	{
 		if ((in & ipFilterList->ipFilters[i].mask) == ipFilterList->ipFilters[i].compare)
 		{
-			return g_filterBan.integer != 0;
+			return tvg_filterBan.integer != 0;
 		}
 	}
 
-	return g_filterBan.integer == 0;
+	return tvg_filterBan.integer == 0;
 }
 
 /**
@@ -306,11 +302,11 @@ void TVG_ProcessIPBans(void)
 	char str[MAX_CVAR_VALUE_STRING];
 
 	ipFilters.numIPFilters = 0;
-	Q_strncpyz(ipFilters.cvarIPList, "g_banIPs", sizeof(ipFilters.cvarIPList));
+	Q_strncpyz(ipFilters.cvarIPList, "tvg_banIPs", sizeof(ipFilters.cvarIPList));
 
-	Q_strncpyz(str, g_banIPs.string, sizeof(str));
+	Q_strncpyz(str, tvg_banIPs.string, sizeof(str));
 
-	for (t = s = g_banIPs.string; *t; /* */)
+	for (t = s = tvg_banIPs.string; *t; /* */)
 	{
 		s = strchr(s, ' ');
 		if (!s)
@@ -388,7 +384,7 @@ void Svcmd_RemoveIP_f(void)
  */
 void Svcmd_ListIp_f(void)
 {
-	trap_SendConsoleCommand(EXEC_INSERT, "g_banIPs\n");
+	trap_SendConsoleCommand(EXEC_INSERT, "tvg_banIPs\n");
 }
 
 /**
@@ -510,22 +506,11 @@ void Svcmd_EntityList_f(void)
 		// print the ents which are in use
 		//Q_strcat(line, sizeof(line), va("^7%4i: ", e));
 
-		if (check->neverFree)
-		{
-			Com_sprintf(line, 128, "^1%4i: ", e);
-		}
-		else
-		{
-			Com_sprintf(line, 128, "^7%4i: ", e);
-		}
+		Com_sprintf(line, 128, "^7%4i: ", e);
 
 		if (check->s.eType <= ET_EVENTS) // print events
 		{
 			Q_strcat(line, sizeof(line), va("^3%-27s^7", enttypenames[check->s.eType]));
-		}
-		else
-		{
-			Q_strcat(line, sizeof(line), va("^2%-27s^7", eventnames[check->s.eType - ET_EVENTS]));
 		}
 
 		if (check->classname)
@@ -1316,7 +1301,7 @@ void Svcmd_Ref_f(void)
  */
 qboolean Svcmd_Say_f(void)
 {
-	if (g_dedicated.integer)
+	if (tvg_dedicated.integer)
 	{
 		trap_SendServerCommand(-1, va("cpm \"server: %s\n\"", Q_AddCR(ConcatArgs(1))));
 		return qtrue;
@@ -1329,7 +1314,7 @@ qboolean Svcmd_Say_f(void)
  */
 qboolean Svcmd_Chat_f(void)
 {
-	if (g_dedicated.integer)
+	if (tvg_dedicated.integer)
 	{
 		// added for rcon/Lua chat
 		trap_SendServerCommand(-1, va("chat \"console: %s\"", Q_AddCR(ConcatArgs(1))));
@@ -1372,8 +1357,8 @@ static consoleCommandTable_t consoleCommandTable[] =
 	{ "cp",            Svcmd_CP_f         },
 	{ "sv_cvarempty",  CC_cvarempty       },
 	{ "sv_cvar",       CC_svcvar          },
-	{ "playsound",     G_PlaySound_Cmd    },
-	{ "playsound_env", G_PlaySound_Cmd    },
+	{ "playsound",     TVG_PlaySound_Cmd  },
+	{ "playsound_env", TVG_PlaySound_Cmd  },
 
 	{ "ref",           Svcmd_Ref_f        },                            // console also gets ref commands
 	{ "qsay",          Svcmd_Qsay_f       },
@@ -1393,21 +1378,21 @@ qboolean TVG_ConsoleCommand(void)
 #ifdef FEATURE_LUA
 	if (!Q_stricmp(cmd, "lua_status"))
 	{
-		G_LuaStatus(NULL);
+		TVG_LuaStatus(NULL);
 		return qtrue;
 	}
 	else if (!Q_stricmp(cmd, "lua_restart"))
 	{
-		G_LuaRestart();
+		TVG_LuaRestart();
 		return qtrue;
 	}
 	else if (Q_stricmp(cmd, "lua_api") == 0)
 	{
-		G_LuaStackDump();
+		TVG_LuaStackDump();
 		return qtrue;
 	}
 	// *LUA* API callbacks
-	else if (G_LuaHook_ConsoleCommand(cmd))
+	else if (TVG_LuaHook_ConsoleCommand(cmd))
 	{
 		return qtrue;
 	}

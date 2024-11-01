@@ -36,7 +36,8 @@
 #ifndef INCLUDE_Q_MATH_H
 #define INCLUDE_Q_MATH_H
 
-#include "q_shared.h"
+#include "q_primitives.h"
+#include "q_platform.h"
 
 typedef float vec_t;
 typedef vec_t vec2_t[2];
@@ -260,6 +261,13 @@ static ID_INLINE float vec2_length(const vec2_t v)
 // Subtract
 #define vec2_sub(a, b, c)      ((c)[0] = (a)[0] - (b)[0], (c)[1] = (a)[1] - (b)[1])
 #define vec2_snap(v) { v[0] = ((int)(v[0])); v[1] = ((int)(v[1])); }
+static ID_INLINE float vec2_dist(vec2_t v1, vec2_t v2)
+{
+	vec3_t dir;
+
+	vec2_sub(v2, v1, dir);
+	return vec2_length(dir);
+}
 
 /************************************************************************/
 /* Vector 3                                                             */
@@ -449,9 +457,18 @@ void BoundsAdd(vec3_t mins, vec3_t maxs, const vec3_t mins2, const vec3_t maxs2)
 
 float Q_acos(float c);
 
-int Q_rand(int *seed);
-float Q_random(int *seed);
-float Q_crandom(int *seed);
+/**
+ * @brief LCG
+ * @param x
+ * @return
+ */
+static inline int Q_LCG(int x)
+{
+	return (int)((69069U * x + 1U) & 0x7FFFFFFF);
+}
+
+int Q_RandomInt(int *seed);
+float Q_RandomFloat(int *seed);
 
 #define random()    ((rand() & 0x7fff) / ((float)0x7fff))
 #define crandom()   (2.0f * (random() - 0.5f))

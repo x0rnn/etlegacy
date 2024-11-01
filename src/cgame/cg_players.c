@@ -573,10 +573,19 @@ static void CG_SetLerpFrameAnimation(centity_t *cent, clientInfo_t *ci, lerpFram
 	lf->animation     = anim;
 	lf->animationTime = lf->frameTime + anim->initialLerp;
 
-	if (cg_debugAnim.integer == 1)
+	if ((cg_debugAnim.integer == 1 || cg_debugAnim.integer == 2) && cg_thirdPerson.integer)
 	{
-		CG_Printf("Anim: %i, %s\n", newAnimation, character->animModelInfo->animations[newAnimation]->name);
+		CG_Printf("anim-player: %i, %s\n", newAnimation, character->animModelInfo->animations[newAnimation]->name);
 	}
+}
+
+int CG_CalcLoopFrames(animation_t *anim)
+{
+	if (anim->loopFrames == -1)
+	{
+		return anim->numFrames;
+	}
+	return anim->loopFrames;
 }
 
 /**
@@ -634,11 +643,12 @@ void CG_RunLerpFrame(centity_t *cent, clientInfo_t *ci, lerpFrame_t *lf, int new
 		f *= speedScale;        // adjust for haste, etc
 		if (f >= anim->numFrames)
 		{
+			int loopFrames = CG_CalcLoopFrames(anim);
 			f -= anim->numFrames;
-			if (anim->loopFrames)
+			if (loopFrames)
 			{
-				f %= anim->loopFrames;
-				f += anim->numFrames - anim->loopFrames;
+				f %= loopFrames;
+				f += anim->numFrames - loopFrames;
 			}
 			else
 			{
@@ -654,9 +664,9 @@ void CG_RunLerpFrame(centity_t *cent, clientInfo_t *ci, lerpFrame_t *lf, int new
 		if (cg.time > lf->frameTime)
 		{
 			lf->frameTime = cg.time;
-			if (cg_debugAnim.integer)
+			if (cg_debugAnim.integer == 2)
 			{
-				CG_Printf("Clamp lf->frameTime\n");
+				CG_Printf("CG_RunLerpFrame: Clamp lf->frameTime\n");
 			}
 		}
 	}
@@ -736,7 +746,7 @@ void CG_SetLerpFrameAnimationRate(centity_t *cent, clientInfo_t *ci, lerpFrame_t
 
 	if (newAnimation < 0 || newAnimation >= character->animModelInfo->numAnimations)
 	{
-		CG_Error("CG_SetLerpFrameAnimationRate: Bad animation number: %i\n", newAnimation);
+		CG_Error("CG_SetLerpFrameAnimationRate: Bad animation number: %i (numAnimations: %i)\n", newAnimation, character->animModelInfo->numAnimations);
 	}
 
 	anim = character->animModelInfo->animations[newAnimation];
@@ -797,9 +807,9 @@ void CG_SetLerpFrameAnimationRate(centity_t *cent, clientInfo_t *ci, lerpFrame_t
 		lf->frameModel    = anim->mdxFile;
 	}
 
-	if (cg_debugAnim.integer == 1) // extra debug info
+	if ((cg_debugAnim.integer == 1 || cg_debugAnim.integer == 2) && cg_thirdPerson.integer) // extra debug info
 	{
-		CG_Printf("Anim: %i, %s\n", newAnimation, character->animModelInfo->animations[newAnimation]->name);
+		CG_Printf("anim-player: %i : %24s : %3d\n", newAnimation, character->animModelInfo->animations[newAnimation]->name, anim->movetype);
 	}
 }
 
@@ -1048,11 +1058,12 @@ void CG_RunLerpFrameRate(clientInfo_t *ci, lerpFrame_t *lf, int newAnimation, ce
 		//f = ( lf->frameTime - lf->animationTime ) / anim->frameLerp;
 		if (f >= anim->numFrames)
 		{
+			int loopFrames = CG_CalcLoopFrames(anim);
 			f -= anim->numFrames;
-			if (anim->loopFrames)
+			if (loopFrames)
 			{
-				f %= anim->loopFrames;
-				f += anim->numFrames - anim->loopFrames;
+				f %= loopFrames;
+				f += anim->numFrames - loopFrames;
 			}
 			else
 			{
@@ -1086,9 +1097,9 @@ void CG_RunLerpFrameRate(clientInfo_t *ci, lerpFrame_t *lf, int newAnimation, ce
 				CG_RunLerpFrameRate(ci, lf, newAnimation, cent, recursion + 1);
 			}
 
-			if (cg_debugAnim.integer > 3)
+			if (cg_debugAnim.integer == 2)
 			{
-				CG_Printf("Clamp lf->frameTime\n");
+				CG_Printf("CG_RunLerpFrameRate: Clamp lf->frameTime\n");
 			}
 		}
 		lf->oldAnimationNumber = lf->animationNumber;
@@ -1195,9 +1206,9 @@ void CG_SetLerpFrameAnimationRateCorpse(centity_t *cent, lerpFrame_t *lf, int ne
 	lf->frameTime     = cg.time - 1;
 	lf->animationTime = cg.time + rest - anim->duration;
 	lf->frameModel    = anim->mdxFile;
-	if (cg_debugAnim.integer)
+	if ((cg_debugAnim.integer == 1 || cg_debugAnim.integer == 2) && cg_thirdPerson.integer)
 	{
-		CG_Printf("Anim: %i, %s\n", newAnimation, character->animModelInfo->animations[newAnimation]->name);
+		CG_Printf("anim-player: %i, %s\n", newAnimation, character->animModelInfo->animations[newAnimation]->name);
 	}
 }
 
@@ -1266,11 +1277,12 @@ void CG_RunLerpFrameRateCorpse(clientInfo_t *ci, lerpFrame_t *lf, int newAnimati
 		f = (lf->frameTime - lf->animationTime) / anim->frameLerp;
 		if (f >= anim->numFrames)
 		{
+			int loopFrames = CG_CalcLoopFrames(anim);
 			f -= anim->numFrames;
-			if (anim->loopFrames)
+			if (loopFrames)
 			{
-				f %= anim->loopFrames;
-				f += anim->numFrames - anim->loopFrames;
+				f %= loopFrames;
+				f += anim->numFrames - loopFrames;
 			}
 			else
 			{
@@ -1286,9 +1298,9 @@ void CG_RunLerpFrameRateCorpse(clientInfo_t *ci, lerpFrame_t *lf, int newAnimati
 		{
 			lf->frameTime = cg.time;
 
-			if (cg_debugAnim.integer)
+			if (cg_debugAnim.integer == 2)
 			{
-				CG_Printf("Clamp lf->frameTime\n");
+				CG_Printf("CG_RunLerpFrameRateCorpse: Clamp lf->frameTime\n");
 			}
 		}
 	}
@@ -2001,24 +2013,35 @@ static void CG_PlayerFloatSprite(centity_t *cent, qhandle_t shader, int height, 
 	ent.origin[2] += vPos[off];
 	VectorMA(ent.origin, hPos[off], right, ent.origin) ;
 
-	// Account for ducking
-	// FIXME: adjust origin for others
-	if (cent->currentState.clientNum == cg.snap->ps.clientNum)
+	if ((cent->currentState.eFlags & EF_DEAD) && (cg_spritesFollowHeads.integer > 0))
 	{
-		if (cent->currentState.eFlags & EF_CROUCHING)
-		{
-			ent.origin[2] -= 18;
-		}
-		else if (cent->currentState.eFlags & EF_PRONE)
-		{
-			ent.origin[2] -= 45;
-		}
+		// "new-way" - trash any previously set Z coord and instead reset to a player's head
+		// as long as we're not dead
+		ent.origin[2] = cent->pe.headRefEnt.origin[2] + 20;
 	}
 	else
 	{
-		if (cent->currentState.animMovetype)
+		// "old-way" - use hardcoded Z coord dependent on player state
+
+		// Account for ducking
+		// FIXME: adjust origin for others
+		if (cent->currentState.clientNum == cg.snap->ps.clientNum)
 		{
-			ent.origin[2] -= 18;
+			if (cent->currentState.eFlags & EF_CROUCHING)
+			{
+				ent.origin[2] -= 18;
+			}
+			else if (cent->currentState.eFlags & EF_PRONE)
+			{
+				ent.origin[2] -= 45;
+			}
+		}
+		else
+		{
+			if (cent->currentState.animMovetype)
+			{
+				ent.origin[2] -= 18;
+			}
 		}
 	}
 
@@ -2552,30 +2575,26 @@ static void CG_PlayerSplash(centity_t *cent)
 void CG_AddRefEntityWithPowerups(refEntity_t *ent, int powerups, int team, entityState_t *es, const vec3_t fireRiseDir)
 {
 	refEntity_t backupRefEnt; //, parentEnt;
-	qboolean    onFire = qfalse;
-	float       alpha  = 0.0;
+	qboolean    onFire;
 
 	ent->entityNum = es->number;
+	backupRefEnt   = *ent;
 
-	/*  if (cent->pe.forceLOD) {
-	        ent->reFlags |= REFLAG_FORCE_LOD;
-	    }*/
+	onFire = CG_EntOnFire(&cg_entities[es->number]);
 
-	backupRefEnt = *ent;
-
-	if (CG_EntOnFire(&cg_entities[es->number]))
+	if (onFire)
 	{
 		ent->reFlags |= REFLAG_FORCE_LOD;
 	}
 
 	trap_R_AddRefEntityToScene(ent);
 
-	// FIXME: onFire is always true !
-	if (!onFire && CG_EntOnFire(&cg_entities[es->number]))
+	if (onFire)
 	{
-		float fireStart, fireEnd;
+		float fireStart;
+		float fireEnd;
+		float alpha;
 
-		onFire = qtrue;
 		// set the alpha
 		if (ent->entityNum == cg.snap->ps.clientNum)
 		{
@@ -2597,10 +2616,7 @@ void CG_AddRefEntityWithPowerups(refEntity_t *ent, int powerups, int team, entit
 				alpha = 1.0f;
 			}
 		}
-	}
 
-	if (onFire)
-	{
 		if (alpha < 0.0f)
 		{
 			alpha = 0.0f;
@@ -2696,7 +2712,6 @@ void CG_AnimPlayerConditions(bg_character_t *character, centity_t *cent)
 
 	BG_UpdateConditionValue(es->clientNum, ANIM_COND_IMPACT_POINT, IMPACTPOINT_UNUSED, qtrue);
 	BG_UpdateConditionValue(es->clientNum, ANIM_COND_STUNNED, 0, qtrue);
-	BG_UpdateConditionValue(es->clientNum, ANIM_COND_SUICIDE, 0, qtrue);
 }
 
 /**
@@ -3250,12 +3265,19 @@ void CG_GetBleedOrigin(vec3_t head_origin, vec3_t body_origin, int fleshEntityNu
  */
 qboolean CG_GetTag(int clientNum, const char *tagname, orientation_t *orientation)
 {
-	clientInfo_t *ci = &cgs.clientinfo[clientNum];
+	clientInfo_t *ci;
 	centity_t    *cent;
 	refEntity_t  *refent;
 	vec3_t       tempAxis[3];
 	vec3_t       org;
 	int          i;
+
+	if (clientNum < 0 || clientNum >= MAX_CLIENTS)
+	{
+		return qfalse;
+	}
+
+	ci = &cgs.clientinfo[clientNum];
 
 	if (cg.snap && clientNum == cg.snap->ps.clientNum && cg.renderingThirdPerson)
 	{
@@ -3437,11 +3459,12 @@ void CG_RunHudHeadLerpFrame(bg_character_t *ch, lerpFrame_t *lf, int newAnimatio
 		f *= speedScale;        // adjust for haste, etc
 		if (f >= anim->numFrames)
 		{
+			int loopFrames = CG_CalcLoopFrames(anim);
 			f -= anim->numFrames;
-			if (anim->loopFrames)
+			if (loopFrames)
 			{
-				f %= anim->loopFrames;
-				f += anim->numFrames - anim->loopFrames;
+				f %= loopFrames;
+				f += anim->numFrames - loopFrames;
 			}
 			else
 			{
@@ -3505,7 +3528,7 @@ void CG_HudHeadAnimation(bg_character_t *ch, lerpFrame_t *lf, int *oldframe, int
 int CG_GetPlayerMaxHealth(int clientNum, int class, int team)
 {
 	int i;
-	int maxHealth = 100;
+	int maxHealth = DEFAULT_HEALTH;
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		if (!cgs.clientinfo[i].infoValid)
@@ -3532,7 +3555,7 @@ int CG_GetPlayerMaxHealth(int clientNum, int class, int team)
 		}
 	}
 
-	if (BG_IsSkillAvailable(cgs.clientinfo[cg.clientNum].skill, SK_BATTLE_SENSE, SK_BATTLE_SENSE_HEALTH))
+	if (BG_IsSkillAvailable(cgs.clientinfo[clientNum].skill, SK_BATTLE_SENSE, SK_BATTLE_SENSE_HEALTH))
 	{
 		maxHealth += 15;
 	}

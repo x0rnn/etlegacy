@@ -107,7 +107,7 @@ void multi_trigger(gentity_t *ent, gentity_t *activator)
 	}
 
 	// only pass in team if activator is a client
-	if (activator->client)
+	if (activator && activator->client)
 	{
 		G_Script_ScriptEvent(ent, "activate", activator->client->sess.sessionTeam == TEAM_AXIS ? "axis" : "allies");
 	}
@@ -1353,7 +1353,7 @@ void Touch_flagonly_multiple(gentity_t *ent, gentity_t *other, trace_t *trace)
 		ent->parent = tmp;
 
 		// reward player for capturing objective item
-		G_AddSkillPoints(other, SK_BATTLE_SENSE, 8.f, "objective captured");
+		G_AddSkillPoints(other, SK_BATTLE_SENSE, 10.f, "objective captured");
 	}
 	else if ((ent->spawnflags & BLUE_FLAG) && other->client->ps.powerups[PW_BLUEFLAG])
 	{
@@ -1383,7 +1383,7 @@ void Touch_flagonly_multiple(gentity_t *ent, gentity_t *other, trace_t *trace)
 		ent->parent = tmp;
 
 		// reward player for capturing objective item
-		G_AddSkillPoints(other, SK_BATTLE_SENSE, 8.f, "objective captured");
+		G_AddSkillPoints(other, SK_BATTLE_SENSE, 10.f, "objective captured");
 	}
 }
 

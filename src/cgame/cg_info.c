@@ -168,7 +168,7 @@ static void CG_DemoControlButtonRender(panel_button_t *button)
 		barColor[3] = button->font->colour[3];
 
 		//borderColor
-		CG_FilledBar(button->rect.x, button->rect.y, button->rect.w, button->rect.h, barColor, NULL, color_border1, color_border1, demoStatus, BAR_BG, -1);
+		CG_FilledBar(button->rect.x, button->rect.y, button->rect.w, button->rect.h, barColor, NULL, color_border1, color_border1, demoStatus, 0.f, BAR_BG, -1);
 	}
 }
 
@@ -659,7 +659,8 @@ void CG_DemoClick(int key, qboolean down)
 				CG_ZoomOut_f();
 			}
 			return;
-		}       // Roll over into timescale changes
+		} // Roll over into timescale changes
+	// fall through
 	case K_KP_LEFTARROW:
 		if (!down && cg_timescale.value > 0.1f)
 		{
@@ -682,7 +683,8 @@ void CG_DemoClick(int key, qboolean down)
 				CG_ZoomIn_f();
 			}
 			return;
-		}       // Roll over into timescale changes
+		} // Roll over into timescale changes
+	// fall through
 	case K_KP_RIGHTARROW:
 		if (!down)
 		{
@@ -870,7 +872,7 @@ void CG_GameStatsDraw(void)
 		    2 + 2 + tSpacing + 2 +                          // Stats columns
 		    1 +                                             // Stats + extra
 		    tSpacing * ((gs->cWeapons > 0) ? gs->cWeapons : 1) +
-		    tSpacing * ((gs->fHasStats) ? 7 : 0) +
+		    tSpacing * ((gs->fHasStats) ? ARRAY_LEN(gs->strExtra) + 1 : 0) +
 		    ((cgs.gametype == GT_WOLF_LMS) ? 0 :
 			 (
 				 4 + 2 * tSpacing +                                 // Rank/XP/Skill Rating
@@ -957,7 +959,7 @@ void CG_GameStatsDraw(void)
 			if (gs->fHasStats)
 			{
 				y += tSpacing;
-				for (i = 0; i < 6; i++)
+				for (i = 0; i < ARRAY_LEN(gs->strExtra); i++)
 				{
 					y += tSpacing;
 					CG_Text_Paint_Ext(x + 4, y, tScale, tScale, tColor, gs->strExtra[i], 0.0f, 0, tStyle, tFont);
@@ -1718,7 +1720,7 @@ void CG_DrawDemoControls(int x, int y, int w, vec4_t borderColor, vec4_t bgColor
 	{
 		// render cursor
 		trap_R_SetColor(NULL);
-		CG_DrawPic(cgDC.cursorx, cgDC.cursory, 32, 32, cgs.media.cursorIcon);
+		CG_DrawCursor(cgDC.cursorx, cgDC.cursory);
 	}
 }
 

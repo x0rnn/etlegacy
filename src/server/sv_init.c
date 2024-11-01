@@ -98,6 +98,12 @@ void SV_SetConfigstring(int index, const char *val)
 	sv.configstrings[index]         = CopyString(val);
 	sv.configstringsmodified[index] = qtrue;
 
+	if (svcls.isTVGame && svcls.state != CA_LOADING &&
+	    (index == CS_SERVERINFO || index == CS_WOLFINFO))
+	{
+		SV_CL_ConfigstringInfoChanged(index);
+	}
+
 	// save config strings to demo
 	if (sv.demoState == DS_RECORDING)
 	{
@@ -300,6 +306,21 @@ void SV_CreateBaseline(void)
 	sharedEntity_t *svent;
 	int            entnum;
 
+	if (svcls.isTVGame)
+	{
+		for (entnum = 0; entnum < MAX_GENTITIES; entnum++)
+		{
+			if (svcl.currentStateEntitiesShared[entnum].linked)
+			{
+				svent           = SV_GentityNum(entnum);
+				svent->s        = svcl.currentStateEntities[entnum];
+				svent->r        = svcl.currentStateEntitiesShared[entnum];
+				sv.num_entities = entnum + 1;
+				SV_LinkEntity(svent);
+			}
+		}
+	}
+
 	for (entnum = 1; entnum < sv.num_entities ; entnum++)
 	{
 		svent = SV_GentityNum(entnum);
@@ -331,7 +352,10 @@ void SV_BoundMaxClients(int minimum)
 	{
 		Cvar_Set("sv_maxclients", va("%i", minimum));
 	}
-	else if (sv_maxclients->integer > MAX_CLIENTS)
+	else if (sv_maxclients->integer > MAX_CLIENTS
+	         // no limit for etltv slave server
+	         && svcls.state <= CA_DISCONNECTED
+	         )
 	{
 		Cvar_Set("sv_maxclients", va("%i", MAX_CLIENTS));
 	}
@@ -739,7 +763,7 @@ void SV_SpawnServer(const char *server)
 
 	// allocate the snapshot entities on the hunk
 	svs.snapshotEntities       = Hunk_Alloc(sizeof(entityState_t) * svs.numSnapshotEntities, h_high);
-	svs.snapshotSharedEntities = Hunk_Alloc(sizeof(entityShared_t) * svs.numSnapshotEntities, h_high);
+	svs.snapshotEntitiesShared = Hunk_Alloc(sizeof(entityShared_t) * svs.numSnapshotEntities, h_high);
 	svs.nextSnapshotEntities   = 0;
 
 	// toggle the server bit so clients can detect that a
@@ -840,11 +864,14 @@ void SV_SpawnServer(const char *server)
 					client_t       *client;
 					sharedEntity_t *ent;
 
-					client          = &svs.clients[i];
-					client->state   = CS_ACTIVE;
-					ent             = SV_GentityNum(i);
-					ent->s.number   = i;
-					client->gentity = ent;
+					client        = &svs.clients[i];
+					client->state = CS_ACTIVE;
+					if (!svcls.isTVGame)
+					{
+						ent             = SV_GentityNum(i);
+						ent->s.number   = i;
+						client->gentity = ent;
+					}
 
 					client->deltaMessage     = -1;
 					client->lastSnapshotTime = 0;   // generate a snapshot immediately
@@ -1204,8 +1231,14 @@ void SV_Init(void)
 
 	sv_serverTimeReset = Cvar_GetAndDescribe("sv_serverTimeReset", "0", CVAR_ARCHIVE_ND, "Reset server time on map change.");
 
-	sv_etltv_maxslaves = Cvar_GetAndDescribe("sv_etltv_maxslaves", "0", CVAR_ARCHIVE_ND, "Number of ettv slaves allowed to connect.");
-	sv_etltv_password  = Cvar_GetAndDescribe("sv_etltv_password", "", CVAR_ARCHIVE_ND, "Password for ettv slaves. Must be set, or no slaves will be able to connect.");
+	sv_etltv_maxslaves  = Cvar_GetAndDescribe("sv_etltv_maxslaves", "0", CVAR_ARCHIVE_ND, "Number of ettv slaves allowed to connect.");
+	sv_etltv_password   = Cvar_GetAndDescribe("sv_etltv_password", "", CVAR_ARCHIVE_ND, "Password for ettv slaves. Must be set, or no slaves will be able to connect.");
+	sv_etltv_autorecord = Cvar_Get("sv_etltv_autorecord", "0", CVAR_ARCHIVE_ND);
+	sv_etltv_autoplay   = Cvar_Get("sv_etltv_autoplay", "0", CVAR_ARCHIVE_ND);
+	sv_etltv_clientname = Cvar_GetAndDescribe("sv_etltv_clientname", "ETLTV", CVAR_ARCHIVE_ND, "Name of the ETLTV client.");
+	sv_etltv_delay      = Cvar_GetAndDescribe("sv_etltv_delay", "0", CVAR_INIT, "Delay feed by number of seconds.");
+	sv_etltv_shownet    = Cvar_Get("sv_etltv_shownet", "0", CVAR_ARCHIVE_ND);
+	sv_etltv_queue_ms   = Cvar_Get("ettv_queue_ms", "-1", CVAR_ROM); // ettv_queue_ms for ettv backward compatibility
 
 #if defined(FEATURE_IRC_SERVER) && defined(DEDICATED)
 	IRC_Init();
@@ -1269,6 +1302,11 @@ void SV_Shutdown(const char *finalmsg)
 	if (!com_sv_running || !com_sv_running->integer)
 	{
 		return;
+	}
+
+	if (!svclc.demo.playing)
+	{
+		SV_CL_Disconnect();
 	}
 
 #if defined(FEATURE_IRC_SERVER) && defined(DEDICATED)

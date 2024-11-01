@@ -11,6 +11,7 @@ FILE(GLOB COMMON_SRC
 
 FILE(GLOB COMMON_SRC_REMOVE
 	"src/qcommon/dl_main_curl.c"
+	"src/qcommon/dl_main_android.c"
 	"src/qcommon/dl_main_stubs.c"
 	"src/qcommon/i18n_*"
 	"src/qcommon/auth.c"
@@ -99,8 +100,6 @@ FILE(GLOB QAGAME_SRC
 )
 
 FILE(GLOB TVGAME_SRC
-    "src/game/bg_*.c"
-	"src/game/g_mdx*"
 	"src/game/g_strparse*"
 	"src/game/surfaceflags*"
 	"src/game/g_match_tokens.c"
@@ -156,6 +155,16 @@ FILE(GLOB RENDERER_COMMON
 	"src/qcommon/puff.h"
 )
 
+SET(RENDERER_COMMON_OPENGL
+	"src/renderercommon/tr_common_opengl.c"
+)
+
+SET(RENDERER_COMMON_VULKAN
+	"src/renderercommon/tr_common_vulkan.c"
+)
+
+LIST(REMOVE_ITEM RENDERER_COMMON ${RENDERER_COMMON_OPENGL} ${RENDERER_COMMON_VULKAN})
+
 FILE(GLOB RENDERER_COMMON_DYNAMIC
 	"src/qcommon/q_shared.c"
 	"src/qcommon/q_math.c"
@@ -188,6 +197,18 @@ FILE(GLOB RENDERER2_SHADERS
 
 FILE(GLOB RENDERER2_SHADERDEFS
 	"src/renderer2/gldef/*.gldef"
+)
+
+FILE(GLOB RENDERER_VULKAN_FILES
+	"src/renderer_vk/*.c"
+	"src/renderer_vk/*.h"
+	"src/renderer_vk/vulkan/*.c"
+	"src/renderer_vk/vulkan/*.h"
+)
+
+FILE(GLOB RENDERER_VULKAN_SHADERS
+	"src/renderer_vk/glsl/*.glsl"
+	"src/renderer_vk/glsl/*/*.glsl"
 )
 
 FILE(GLOB IRC_CLIENT_FILES

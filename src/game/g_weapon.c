@@ -347,7 +347,7 @@ void ReviveEntity(gentity_t *ent, gentity_t *traceEnt)
 	// keep class special weapon time to keep them from exploiting revives
 	oldclasstime = traceEnt->client->ps.classWeaponTime;
 
-	ClientSpawn(traceEnt, qtrue, qfalse, qtrue);
+	ClientSpawn(traceEnt, qtrue, qfalse, qtrue, qtrue);
 
 #ifdef FEATURE_OMNIBOT
 	Bot_Event_Revived(traceEnt - g_entities, ent);
@@ -393,12 +393,12 @@ void ReviveEntity(gentity_t *ent, gentity_t *traceEnt)
 
 	if (g_fastres.integer > 0)
 	{
-		BG_AnimScriptEvent(&traceEnt->client->ps, traceEnt->client->pers.character->animModelInfo, ANIM_ET_JUMP, qfalse, qtrue);
+		BG_AnimScriptEvent(&traceEnt->client->ps, traceEnt->client->pers.character->animModelInfo, ANIM_ET_JUMP, qfalse);
 	}
 	else
 	{
 		// Play revive animation
-		BG_AnimScriptEvent(&traceEnt->client->ps, traceEnt->client->pers.character->animModelInfo, ANIM_ET_REVIVE, qfalse, qtrue);
+		BG_AnimScriptEvent(&traceEnt->client->ps, traceEnt->client->pers.character->animModelInfo, ANIM_ET_REVIVE, qfalse);
 		traceEnt->client->ps.pm_flags |= PMF_TIME_LOCKPLAYER;
 		traceEnt->client->ps.pm_time   = 2100;
 	}
@@ -1021,6 +1021,9 @@ static qboolean TryConstructing(gentity_t *ent, gentity_t *trigger)
 
 		if (constructible->s.angles2[0] >= 250)
 		{
+			// hint task completed
+			ent->lastTaskAchievedTime = level.time;
+
 			constructible->s.angles2[0] = 0;
 			HandleEntsThatBlockConstructible(ent, constructible, qtrue, qfalse);
 		}
@@ -1613,6 +1616,9 @@ gentity_t *Weapon_Engineer(gentity_t *ent)
 
 		if (traceEnt->health >= 255)
 		{
+			// hint task completed
+			ent->lastTaskAchievedTime = level.time;
+
 			traceEnt->s.frame = 0;
 
 			if (traceEnt->mg42BaseEnt > 0)
@@ -1784,15 +1790,11 @@ weapengineergoto2:
 						return NULL;
 					}
 
+					// hint task completed
+					ent->lastTaskAchievedTime = level.time;
+
 					// crosshair mine owner id
-					if (g_misc.integer & G_MISC_CROSSHAIR_LANDMINE)
-					{
-						traceEnt->s.otherEntityNum = ent->s.number;
-					}
-					else
-					{
-						traceEnt->s.otherEntityNum = MAX_CLIENTS + 1;
-					}
+					traceEnt->s.otherEntityNum = ent->s.number;
 
 					traceEnt->r.snapshotCallback = qtrue;
 					traceEnt->r.contents         = 0; // (player can walk through)
@@ -1834,6 +1836,9 @@ weapengineergoto3:
 					if (traceEnt->health >= 250)
 					{
 						mapEntityData_t *mEnt;
+
+						// hint task completed
+						ent->lastTaskAchievedTime = level.time;
 
 						//traceEnt->health = 255;
 						//traceEnt->think = G_FreeEntity;
@@ -1882,6 +1887,9 @@ weapengineergoto3:
 
 			if (traceEnt->health >= 250)
 			{
+				// hint task completed
+				ent->lastTaskAchievedTime = level.time;
+
 				traceEnt->health    = 255;
 				traceEnt->think     = G_FreeEntity;
 				traceEnt->nextthink = level.time + FRAMETIME;
@@ -2042,6 +2050,9 @@ weapengineergoto3:
 					return NULL;
 				}
 
+				// hint task completed
+				ent->lastTaskAchievedTime = level.time;
+
 				// don't allow disarming for sec (so guy that WAS arming doesn't start disarming it!
 				traceEnt->timestamp = level.time + 1000;
 				traceEnt->health    = 5;
@@ -2050,14 +2061,7 @@ weapengineergoto3:
 				traceEnt->s.effect1Time = level.time;
 
 				// dynamite crosshair ID
-				if (g_misc.integer & G_MISC_CROSSHAIR_DYNAMITE)
-				{
-					traceEnt->s.otherEntityNum = ent->s.number;
-				}
-				else
-				{
-					traceEnt->s.otherEntityNum = MAX_CLIENTS + 1;
-				}
+				traceEnt->s.otherEntityNum = ent->s.number;
 
 				// arm it
 				traceEnt->nextthink = level.time + 30000;
@@ -2279,6 +2283,9 @@ weapengineergoto3:
 					// TODO: Need some kind of event/announcement here
 
 					//Add_Ammo( ent, WP_DYNAMITE, 1, qtrue );
+
+					// hint task completed
+					ent->lastTaskAchievedTime = level.time;
 
 					traceEnt->think     = G_FreeEntity;
 					traceEnt->nextthink = level.time + FRAMETIME;
@@ -2738,7 +2745,7 @@ void G_AirStrikeThink(gentity_t *ent)
 
 			VectorCopy(ent->r.currentAngles, angle);
 
-			angle[0] = AngleSubtract(angle[0], -(10 + crandom() * 10));
+			angle[0] = AngleSubtract(angle[0], -(15 + crandom() * 5));
 			VectorCopy(angle, bomb->r.currentAngles);
 			VectorCopy(angle, bomb->s.apos.trBase);
 		}
@@ -2982,6 +2989,15 @@ void G_ArtilleryExplode(gentity_t *ent)
 }
 
 /**
+ * @brief G_ArtilleryThink
+ * @param[in,out] ent
+ */
+void G_ArtilleryThink(gentity_t *ent)
+{
+	G_AddEvent(ent, EV_MISSILE_FALLING, 0);
+}
+
+/**
  * @brief Dropping the artillery bomb
  * @param[in,out] ent
  * @note arty nextthink is used to store delay between each shelling bomb, it is overwrite
@@ -3060,13 +3076,11 @@ void artillerySpotterThink(gentity_t *ent)
 		bomb = fire_missile((ent->parent && ent->parent->client) ? ent->parent : ent, tr.endpos, tv(0, 0, (ground - tr.endpos[2]) * (1.f / 0.75f)), ent->s.weapon);
 	}
 
-	G_AddEvent(bomb, EV_MISSILE_FALLING, 0);
-
 	// next bomb drop, add randomness
 	ent->nextthink = bomb->nextthink + crandom() * 800;
 
 	// overwrite
-	bomb->nextthink = 0;
+	bomb->nextthink = level.time + FRAMETIME;
 
 	// no more bomb to drop
 	if (ent->count <= 0)
@@ -3564,11 +3578,11 @@ void Bullet_Fire_Extended(gentity_t *source, gentity_t *attacker, vec3_t start, 
 	}
 
 	// send bullet impact
-	tent                   = G_TempEntity(impactPos, EV_BULLET);
-	tent->s.eventParm      = traceEnt->s.number;
-	tent->s.weapon         = GetMODTableData(mod)->weaponIcon;
-	tent->s.otherEntityNum = attacker->s.number;
-	tent->s.modelindex     = hitType;   // send the hit sound info in the flesh hit event
+	tent                    = G_TempEntity(impactPos, EV_BULLET);
+	tent->s.otherEntityNum2 = traceEnt->s.number;
+	tent->s.weapon          = GetMODTableData(mod)->weaponIcon;
+	tent->s.otherEntityNum  = attacker->s.number;
+	tent->s.modelindex      = hitType;   // send the hit sound info in the flesh hit event
 
 	/*return hitClient;*/
 }
@@ -3825,13 +3839,21 @@ FLAMETHROWER
  * @param[in,out] body
  * @param[in] chunk
  */
-void G_BurnMeGood(gentity_t *self, gentity_t *body, gentity_t *chunk)
+void G_BurnMeGood(gentity_t *self, gentity_t *body, gentity_t *chunk, const qboolean directhit)
 {
 	vec3_t origin;
 
+	// normalize burn dps
+	// direct hits every 50ms, indirect (chunk damage) every 100ms
+	if (level.time < body->lastBurnedFrameTime + (directhit ? DEFAULT_SV_FRAMETIME : FRAMETIME))
+	{
+		return;
+	}
+
 	// add the new damage
-	body->flameQuota    += 5;
-	body->flameQuotaTime = level.time;
+	body->flameQuota         += 5;
+	body->flameQuotaTime      = level.time;
+	body->lastBurnedFrameTime = level.time;
 
 	// fill in our own origin if we have no flamechunk
 	if (chunk != NULL)
@@ -3843,12 +3865,7 @@ void G_BurnMeGood(gentity_t *self, gentity_t *body, gentity_t *chunk)
 		VectorCopy(self->r.currentOrigin, origin);
 	}
 
-	// yet another flamethrower damage model, trying to find a feels-good damage combo that isn't overpowered
-	if (body->lastBurnedFrameNumber != level.framenum)
-	{
-		G_Damage(body, self, self, vec3_origin, origin, GetWeaponTableData(WP_FLAMETHROWER)->damage, 0, MOD_FLAMETHROWER);
-		body->lastBurnedFrameNumber = level.framenum;
-	}
+	G_Damage(body, self, self, vec3_origin, origin, GetWeaponTableData(WP_FLAMETHROWER)->damage, 0, MOD_FLAMETHROWER);
 
 	// make em burn
 	if (body->client && (body->health <= 0 || body->flameQuota > 0)) // was > FLAME_THRESHOLD
@@ -3901,7 +3918,7 @@ gentity_t *Weapon_FlamethrowerFire(gentity_t *ent)
 			if (trace_start[0] * trace_start[0] + trace_start[1] * trace_start[1] < 441)
 			{
 				// set self in flames
-				G_BurnMeGood(ent, ent, NULL);
+				G_BurnMeGood(ent, ent, NULL, qtrue);
 			}
 		}
 	}
@@ -4143,7 +4160,7 @@ weapFireTable_t weapFireTable[] =
 	{ WP_STEN,                 Bullet_Fire,                 NULL,                       NULL,               ET_GENERAL,            EF_NONE,                    SVF_NONE,                     CONTENTS_NONE,   TR_LINEAR,      0,                     { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_SHOT,        0,         0,       0,     0,        0,           },
     { WP_MEDIC_SYRINGE,        Weapon_Syringe,              NULL,                       NULL,               ET_GENERAL,            EF_NONE,                    SVF_NONE,                     CONTENTS_NONE,   TR_LINEAR,      0,                     { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_SHOT,        0,         0,       0,     0,        0,           },
     { WP_AMMO,                 Weapon_MagicAmmo,            G_MagicSink,                NULL,               ET_ITEM,               EF_NONE,                    SVF_NONE,                     CONTENTS_NONE,   TR_GRAVITY,     0,                     { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_SHOT,        30000,     0,       0,     0,        0,           },
-    { WP_ARTY,                 NULL,                        NULL,                       G_ArtilleryExplode, ET_MISSILE,            EF_NONE,                    SVF_BROADCAST,                CONTENTS_NONE,   TR_LINEAR,      MISSILE_PRESTEP_TIME,  { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_MISSILESHOT, 2000,      2,       0,     0,        20,          },
+    { WP_ARTY,                 NULL,                        G_ArtilleryThink,           G_ArtilleryExplode, ET_MISSILE,            EF_NONE,                    SVF_BROADCAST,                CONTENTS_NONE,   TR_LINEAR,      MISSILE_PRESTEP_TIME,  { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_MISSILESHOT, 2000,      2,       0,     0,        20,          },
     { WP_SILENCER,             Bullet_Fire,                 NULL,                       NULL,               ET_GENERAL,            EF_NONE,                    SVF_NONE,                     CONTENTS_NONE,   TR_LINEAR,      0,                     { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_SHOT,        0,         0,       0,     0,        0,           },
     { WP_DYNAMITE,             weapon_grenadelauncher_fire, DynaSink,                   DynaFree,           ET_MISSILE,            EF_BOUNCE_HALF | EF_BOUNCE, SVF_BROADCAST,                CONTENTS_CORPSE, TR_GRAVITY,     MISSILE_PRESTEP_TIME,  { { -10.f, -10.f, 0.f }, { 10.f, 10.f, 11.f } }, { { -12.f, -12.f, 0.f }, { 12.f, 12.f, 20.f } }, MASK_MISSILESHOT, 15000,     0,       5,     16500,    20,          },
     { WP_SMOKETRAIL,           NULL,                        artilleryGoAway,            NULL,               ET_MISSILE,            EF_BOUNCE,                  SVF_NONE,                     CONTENTS_NONE,   TR_GRAVITY,     MISSILE_PRESTEP_TIME,  { { 0, 0, 0 }, { 0, 0, 0 } },                    { { 0, 0, 0 }, { 0, 0, 0 } },                    MASK_MISSILESHOT, 1000,      0,       0,     0,        20,          },
@@ -4206,7 +4223,7 @@ void FireWeapon(gentity_t *ent)
 		return;
 	}
 
-	// mg42
+	// stationary heavy weapon (e.g. misc_mg42, misc_aagun)
 	if (ent->client->ps.persistant[PERS_HWEAPON_USE] && ent->active)
 	{
 		return;

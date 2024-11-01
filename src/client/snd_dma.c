@@ -59,6 +59,7 @@ int       numLoopChannels;
 
 static int      s_soundStarted;
 static qboolean s_soundMuted;
+static qboolean s_soundsPaused;
 
 // sound fading
 static float    s_volStart, s_volTarget;
@@ -200,18 +201,11 @@ static void S_Base_MasterGain(float val)
  */
 void S_Base_SoundList(void)
 {
-	int   i;
-	sfx_t *sfx;
-	int   size, total = 0;
-	char  type[4][16];
-	char  mem[2][16];
-
-	strcpy(type[0], "16bit");
-	strcpy(type[1], "adpcm");
-	strcpy(type[2], "daub4");
-	strcpy(type[3], "mulaw");
-	strcpy(mem[0], "paged out");
-	strcpy(mem[1], "resident");
+	int               i;
+	sfx_t             *sfx;
+	int               size, total = 0;
+	static const char type[4][16] = { "16bit", "adpcm", "daub4", "mulaw" };
+	static const char mem[2][16]  = { "paged out", "resident" };
 
 	for (sfx = knownSfx, i = 0 ; i < numSfx ; i++, sfx++)
 	{
@@ -370,7 +364,7 @@ static sfx_t *S_FindName(const char *name)
 
 	sfx = &knownSfx[i];
 	Com_Memset(sfx, 0, sizeof(*sfx));
-	strcpy(sfx->soundName, name);
+	Q_strncpyz(sfx->soundName, name, sizeof(sfx->soundName));
 
 	sfx->next     = sfxHash[hash];
 	sfxHash[hash] = sfx;
@@ -778,6 +772,8 @@ void S_Base_StartSoundEx(vec3_t origin, int entnum, int entchannel, sfxHandle_t 
 	ch->leftvol     = ch->master_vol;   // these will get calced at next spatialize
 	ch->rightvol    = ch->master_vol;   // unless the game isn't running
 	ch->doppler     = qfalse;
+	ch->paused      = qfalse;
+	ch->pauseOffset = -1;
 }
 
 /**
@@ -1472,6 +1468,15 @@ void S_Base_Respatialize(int entnum, const vec3_t head, vec3_t axis[3], int inwa
 }
 
 /**
+ * @brief S_SoundsPaused
+ * @return qtrue if sounds should be paused
+ */
+static ID_INLINE qboolean S_SoundsPaused(void)
+{
+	return (s_soundsPaused || s_debugPause->integer);
+}
+
+/**
  * @brief S_ScanChannelStarts
  * @return qtrue if any new sounds were started since the last mix
  */
@@ -1495,6 +1500,23 @@ static qboolean S_ScanChannelStarts(void)
 			ch->startSample = s_paintedtime;
 			newSamples      = qtrue;
 			continue;
+		}
+
+		ch->paused = S_SoundsPaused() && (ch->flags & SND_PAUSABLE);
+
+		if (ch->paused)
+		{
+			if (ch->pauseOffset == -1)
+			{
+				ch->pauseOffset = s_paintedtime - ch->startSample;
+			}
+
+			ch->startSample = s_paintedtime - ch->pauseOffset;
+			continue;
+		}
+		else
+		{
+			ch->pauseOffset = -1;
 		}
 
 		// if it is completely finished by now, clear it
@@ -1555,7 +1577,7 @@ void S_GetSoundtime(void)
 
 	if (CL_VideoRecording())
 	{
-		float fps           = MIN(cl_avidemo->integer, 1000.0f);
+		float fps           = MIN(cl_aviFrameRate->integer, 1000.0f);
 		float frameDuration = MAX(dma.speed / fps, 1.0f); // +clc.aviSoundFrameRemainder;
 
 		int msec = (int)frameDuration;
@@ -2267,6 +2289,15 @@ int S_Base_GetCurrentSoundTime(void)
 }
 
 /**
+ * @brief S_Base_PauseSounds For sounds pausing
+ * @param[in] pause
+ */
+void S_Base_PauseSounds(qboolean pause)
+{
+	s_soundsPaused = pause;
+}
+
+/**
  * @brief S_FreeOldestSound
  */
 void S_FreeOldestSound(void)
@@ -2395,6 +2426,7 @@ qboolean S_Base_Init(soundInterface_t *si)
 	si->GetVoiceAmplitude     = S_Base_GetVoiceAmplitude;
 	si->GetSoundLength        = S_Base_GetSoundLength;
 	si->GetCurrentSoundTime   = S_Base_GetCurrentSoundTime;
+	si->PauseSounds           = S_Base_PauseSounds;
 
 #ifdef USE_VOIP
 	si->StartCapture            = S_Base_StartCapture;

@@ -35,18 +35,18 @@
 #include "tvg_local.h"
 
 /**
- * @brief G_SpectatorAttackFollow
+ * @brief TVG_SpectatorAttackFollow
  * @param client
  * @return true if a player was found to follow, otherwise false
  */
-qboolean G_SpectatorAttackFollow(gclient_t *client)
+qboolean TVG_SpectatorAttackFollow(gclient_t *client)
 {
 	trace_t       tr;
 	vec3_t        forward, right, up;
 	vec3_t        start, end;
 	vec3_t        mins, maxs;
-	static vec3_t enlargeMins = { -64.0f, -64.0f, -48.0f };
-	static vec3_t enlargeMaxs = { 64.0f, 64.0f, 0.0f };
+	static vec3_t enlargeMins = { -12.0f, -12.0f, -12.0f };
+	static vec3_t enlargeMaxs = { 12.0f, 12.0f, 0.0f };
 
 	AngleVectors(client->ps.viewangles, forward, right, up);
 	VectorCopy(client->ps.origin, start);
@@ -60,7 +60,7 @@ qboolean G_SpectatorAttackFollow(gclient_t *client)
 	// also put the start-point a bit forward, so we don't start the trace in solid..
 	VectorMA(start, 75.0f, forward, start);
 
-	trap_Trace(&tr, start, mins, maxs, end, client - level.clients, CONTENTS_SOLID | CONTENTS_BODY | CONTENTS_CORPSE);
+	trap_Trace(&tr, start, mins, maxs, end, ENTITYNUM_NONE, CONTENTS_BODY);
 
 	if (tr.entityNum < MAX_CLIENTS && level.ettvMasterClients[tr.entityNum].valid)
 	{
@@ -120,7 +120,7 @@ void TVG_SpectatorThink(gclient_t *client, usercmd_t *ucmd)
 		pm.pointcontents = trap_PointContents;
 		pm.activateLean  = client->pers.activateLean;
 
-		Pmove(&pm);
+		TVG_Pmove(&pm);
 
 		// Activate - made it a latched event (occurs on keydown only)
 		//if (client->latched_buttons & BUTTON_ACTIVATE)
@@ -142,11 +142,11 @@ void TVG_SpectatorThink(gclient_t *client, usercmd_t *ucmd)
 	    client->sess.spectatorState != SPECTATOR_FOLLOW &&
 	    client->sess.sessionTeam == TEAM_SPECTATOR)        // don't do it if on a team
 	{
-		/*if (G_SpectatorAttackFollow(client))
+		if (TVG_SpectatorAttackFollow(client))
 		{
 			return;
 		}
-		else*/
+		else
 		{
 			// not clicked on a player?.. then follow next,
 			// to prevent constant traces done by server.
@@ -176,34 +176,29 @@ void TVG_SpectatorThink(gclient_t *client, usercmd_t *ucmd)
 }
 
 /**
- * @brief
- * g_inactivity and g_spectatorinactivity :
- * Values have to be higher then 10 seconds, that is the time after the warn message is sent.
+ * @brief TVG_ClientInactivityTimer
+ * tvg_inactivity values have to be higher then 10 seconds, that is the time after the warn message is sent.
  * (if it's lower than that value, it will not work at all)
  *
- * @param[in,out] client Client
+ * @param[in,out] client
  *
- * @return Returns qfalse if the client is dropped
+ * @return qfalse if the client is dropped
  */
 qboolean TVG_ClientInactivityTimer(gclient_t *client)
 {
-	int      inactivity     = G_InactivityValue;
-	int      inactivityspec = G_SpectatorInactivityValue;
-	qboolean inTeam         = (client->sess.sessionTeam == TEAM_ALLIES || client->sess.sessionTeam == TEAM_AXIS) ? qtrue : qfalse;
+	int inactivity = TVG_InactivityValue;
 
-	qboolean doDrop = g_spectatorInactivity.integer != 0;
-
-	// no countdown in warmup and intermission
-	if (g_gamestate.integer != GS_PLAYING)
+	// no countdown in intermission
+	if (tvg_gamestate.integer == GS_INTERMISSION)
 	{
 		return qtrue;
 	}
 
 	// inactivity settings disabled?
-	if (g_inactivity.integer == 0 && g_spectatorInactivity.integer == 0)
+	if (tvg_inactivity.integer == 0)
 	{
-		// Give everyone some time, so if the operator sets g_inactivity or g_spectatorinactivity during
-		// gameplay, everyone isn't kicked or moved to spectators
+		// Give everyone some time, so if the operator sets tvg_inactivity
+		// gameplay, everyone isn't kicked
 		client->inactivityTime    = level.time + 60000;
 		client->inactivityWarning = qfalse;
 		return qtrue;
@@ -211,23 +206,12 @@ qboolean TVG_ClientInactivityTimer(gclient_t *client)
 
 	// the client is still active?
 	if (client->pers.cmd.forwardmove || client->pers.cmd.rightmove || client->pers.cmd.upmove ||
-	    (client->pers.cmd.wbuttons & (WBUTTON_LEANLEFT | WBUTTON_LEANRIGHT))  ||
+	    (client->pers.cmd.wbuttons & (WBUTTON_LEANLEFT | WBUTTON_LEANRIGHT)) ||
 	    (client->pers.cmd.buttons & BUTTON_ATTACK) ||
-	    BG_PlayerMounted(client->ps.eFlags) ||
-	    ((client->ps.eFlags & EF_PRONE) && (client->ps.weapon == WP_MOBILE_MG42_SET || client->ps.weapon == WP_MOBILE_BROWNING_SET)) ||
-	    (client->ps.pm_flags & PMF_LIMBO) || (client->ps.pm_type == PM_DEAD) ||
-	    client->sess.shoutcaster)
+	    (client->ps.pm_flags & PMF_FOLLOW))
 	{
 		client->inactivityWarning = qfalse;
-
-		if (inTeam)
-		{
-			client->inactivityTime = level.time + 1000 * inactivity;
-		}
-		else
-		{
-			client->inactivityTime = level.time + 1000 * inactivityspec;
-		}
+		client->inactivityTime    = level.time + 1000 * inactivity;
 		return qtrue;
 	}
 
@@ -240,71 +224,33 @@ qboolean TVG_ClientInactivityTimer(gclient_t *client)
 	// start countdown
 	if (!client->inactivityWarning)
 	{
-		if (g_inactivity.integer && (level.time > client->inactivityTime - inactivity) && inTeam)
+		int secondsLeft;
+
+		if (level.time > client->inactivityTime - inactivity)
 		{
 			client->inactivityWarning     = qtrue;
 			client->inactivityTime        = level.time + 1000 * inactivity;
 			client->inactivitySecondsLeft = inactivity;
 		}
-		// if a player will not be kicked from the server (because there are still free slots),
-		// do not display messages for inactivity-drop/kick.
-		else if (doDrop && g_spectatorInactivity.integer &&
-		         (level.time > client->inactivityTime - inactivityspec) && !inTeam)
+
+		secondsLeft = (client->inactivityTime + inactivity - level.time) / 1000;
+
+		// countdown expired..
+		if (secondsLeft <= 0)
 		{
-			client->inactivityWarning     = qtrue;
-			client->inactivityTime        = level.time + 1000 * inactivityspec;
-			client->inactivitySecondsLeft = inactivityspec;
+			CPx(client - level.clients, "cp \"^3Dropped for inactivity\n\"");
 		}
-
-		if (g_inactivity.integer && inTeam)
+		// display a message at 30 seconds, and countdown at last 10 ..
+		else if (secondsLeft <= 10 || secondsLeft == 30)
 		{
-			int secondsLeft = (client->inactivityTime + inactivity - level.time) / 1000;
-
-			// countdown expired..
-			if (secondsLeft <= 0)
-			{
-				CPx(client - level.clients, "cp \"^3Moved to spectator for inactivity\n\"");
-			}
-			// display a message at 30 seconds, and countdown at last 10 ..
-			else if (secondsLeft <= 10 || secondsLeft == 30)
-			{
-				CPx(client - level.clients, va("cp \"^1%i ^3seconds until moving to spectator for inactivity\n\"", secondsLeft));
-			}
-		}
-		else if (doDrop && g_spectatorInactivity.integer && !inTeam)
-		{
-			int secondsLeft = (client->inactivityTime + inactivityspec - level.time) / 1000;
-
-			// countdown expired..
-			if (secondsLeft <= 0)
-			{
-				CPx(client - level.clients, "cp \"^3Dropped for inactivity\n\"");
-			}
-			// display a message at 30 seconds, and countdown at last 10 ..
-			else if (secondsLeft <= 10 || secondsLeft == 30)
-			{
-				CPx(client - level.clients, va("cp \"^1%i ^3seconds until inactivity drop\n\"", secondsLeft));
-			}
+			CPx(client - level.clients, va("cp \"^1%i ^3seconds until inactivity drop\n\"", secondsLeft));
 		}
 	}
 	else
 	{
-		if (inTeam && g_inactivity.integer)
-		{
-			client->inactivityWarning     = qfalse;
-			client->inactivityTime        = level.time + 1000 * inactivityspec;
-			client->inactivitySecondsLeft = inactivityspec;
-
-			G_Printf("Moved to spectator for inactivity: %s\n", client->pers.netname);
-		}
-		else if (doDrop && g_spectatorInactivity.integer && !inTeam)
-		{
-			// slots occupied by bots should be considered "free",
-			// because bots will disconnect if a human player connects..
-			G_Printf("Spectator dropped for inactivity: %s\n", client->pers.netname);
-			trap_DropClient(client - level.clients, "Dropped due to inactivity", 0);
-			return qfalse;
-		}
+		G_Printf("Spectator dropped for inactivity: %s\n", client->pers.netname);
+		trap_DropClient(client - level.clients, "Dropped due to inactivity", 0);
+		return qfalse;
 	}
 
 	// do not kick by default
@@ -312,15 +258,13 @@ qboolean TVG_ClientInactivityTimer(gclient_t *client)
 }
 
 /**
- * @brief ClientIntermissionThink
+ * @brief TVG_ClientIntermissionThink
  * @param[in,out] client Client
  */
-void ClientIntermissionThink(gclient_t *client)
+void TVG_ClientIntermissionThink(gclient_t *client)
 {
 	client->ps.eFlags &= ~EF_TALK;
 	client->ps.eFlags &= ~EF_FIRING;
-
-	// the level will exit when everyone wants to or after timeouts
 
 	// swap and latch button actions
 	client->oldbuttons = client->buttons;
@@ -333,8 +277,6 @@ void ClientIntermissionThink(gclient_t *client)
 /**
  * @brief This will be called once for each client frame, which will
  * usually be a couple times for each server frame on fast clients.
-
- *
  * @param[in] client
  */
 void TVG_ClientThink_real(gclient_t *client)
@@ -371,37 +313,14 @@ void TVG_ClientThink_real(gclient_t *client)
 		return;
 	}
 
-	// pmove fix
-	if (pmove_msec.integer < 8)
-	{
-		trap_Cvar_Set("pmove_msec", "8");
-	}
-	else if (pmove_msec.integer > 33)
-	{
-		trap_Cvar_Set("pmove_msec", "33");
-	}
-
-	// zinx etpro antiwarp
-	client->pers.pmoveMsec = pmove_msec.integer;
-	if (pmove_fixed.integer || client->pers.pmoveFixed)
-	{
-		ucmd->serverTime = ((ucmd->serverTime + client->pers.pmoveMsec - 1) /
-		                    client->pers.pmoveMsec) * client->pers.pmoveMsec;
-	}
-
-	// check for exiting intermission
-	//if (level.intermissiontime)
-	//{
-	//	ClientIntermissionThink(client);
-	//	return;
-	//}
+	TVG_SendMatchInfo(client);
 
 	// check for inactivity timer, but never drop the local client of a non-dedicated server
 	// moved here to allow for spec inactivity checks as well
-	//if (!TVG_ClientInactivityTimer(client))
-	//{
-	//	return;
-	//}
+	if (!TVG_ClientInactivityTimer(client))
+	{
+		return;
+	}
 
 	for (i = 0; i < INFO_NUM; i++)
 	{
@@ -412,9 +331,13 @@ void TVG_ClientThink_real(gclient_t *client)
 		}
 	}
 
-	// spectators don't do much
-	// In limbo use SpectatorThink
-	if (client->sess.sessionTeam == TEAM_SPECTATOR || (client->ps.pm_flags & PMF_LIMBO))
+	if (level.intermission)
+	{
+		TVG_ClientIntermissionThink(client);
+		return;
+	}
+
+	if (client->sess.sessionTeam == TEAM_SPECTATOR)
 	{
 		TVG_SpectatorThink(client, ucmd);
 	}
@@ -434,7 +357,7 @@ void TVG_ClientThink_cmd(gclient_t *client, usercmd_t *cmd)
 
 /**
  * @brief A new command has arrived from the client
- * @param[in] clientNum Client Number from 0 to MAX_CLIENTS
+ * @param[in] clientNum Client Number from 0 to g_maxclients
  */
 void TVG_ClientThink(int clientNum)
 {
@@ -451,7 +374,7 @@ void TVG_ClientThink(int clientNum)
  */
 void TVG_SpectatorClientEndFrame(gclient_t *client)
 {
-	if (level.intermission)
+	if (level.intermission && client->ps.pm_type != PM_INTERMISSION)
 	{
 		// take out of follow mode if needed
 		if (client->sess.spectatorState == SPECTATOR_FOLLOW)
@@ -460,12 +383,12 @@ void TVG_SpectatorClientEndFrame(gclient_t *client)
 		}
 
 		client->ps.pm_type = PM_INTERMISSION;
-		VectorCopy(level.ettvMasterPs.origin, client->ps.origin);
-		VectorCopy(level.ettvMasterPs.viewangles, client->ps.viewangles);
+		VectorCopy(level.intermission_origin, client->ps.origin);
+		VectorCopy(level.intermission_angle, client->ps.viewangles);
 	}
 
 	// if we are doing a chase cam or a remote view, grab the latest info
-	if (client->sess.spectatorState == SPECTATOR_FOLLOW || (client->ps.pm_flags & PMF_LIMBO))
+	if (client->sess.spectatorState == SPECTATOR_FOLLOW)
 	{
 		if (client->sess.spectatorClient >= 0)
 		{
@@ -507,7 +430,7 @@ void TVG_ClientEndFrame(gclient_t *client)
 		client->sess.nextCommandDecreaseTime = level.time + 1000;
 	}
 
-	if ((client->sess.sessionTeam == TEAM_SPECTATOR) || (client->ps.pm_flags & PMF_LIMBO))
+	if (client->sess.sessionTeam == TEAM_SPECTATOR)
 	{
 		TVG_SpectatorClientEndFrame(client);
 	}

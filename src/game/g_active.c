@@ -98,7 +98,7 @@ void P_DamageFeedback(gentity_t *player)
 	{
 		player->pain_debounce_time = level.time + 700;
 		G_AddEvent(player, EV_PAIN, player->health);
-		//BG_AnimScriptEvent(&client->ps, client->pers.character->animModelInfo, ANIM_ET_PAIN, qfalse, qtrue);
+		//BG_AnimScriptEvent(&client->ps, client->pers.character->animModelInfo, ANIM_ET_PAIN, qfalse);
 	}
 
 	client->ps.damageEvent++;   // always increment this since we do multiple view damage anims
@@ -475,9 +475,19 @@ void G_TouchTriggers(gentity_t *ent)
 		// so you don't have to actually contact its bounding box
 		if (hit->s.eType == ET_ITEM)
 		{
-			if (!BG_PlayerTouchesItem(&ent->client->ps, &hit->s, level.time))
+			if (hit->item && hit->item->giType == IT_TEAM)  // is a CTF flag / objective
 			{
-				continue;
+				if (!BG_PlayerTouchesObjective(&ent->client->ps, &hit->s, level.time))
+				{
+					continue;
+				}
+			}
+			else
+			{
+				if (!BG_PlayerTouchesItem(&ent->client->ps, &hit->s, level.time))
+				{
+					continue;
+				}
 			}
 		}
 		else
@@ -837,6 +847,17 @@ qboolean ClientInactivityTimer(gclient_t *client)
 void ClientTimerActions(gentity_t *ent, int msec)
 {
 	gclient_t *client = ent->client;
+
+	// reset and pause client timer when we've reached maxhealth, such that once
+	// we take damage again, it will take a full second every time to re-heal
+	if (ent->health == client->ps.stats[STAT_MAX_HEALTH])
+	{
+		if (client->timeResidual != 0)
+		{
+			client->timeResidual = 0;
+		}
+		return;
+	}
 
 	client->timeResidual += msec;
 
@@ -1230,6 +1251,8 @@ void ClientThink_real(gentity_t *ent)
 		ucmd->serverTime = ((ucmd->serverTime + client->pers.pmoveMsec - 1) /
 		                    client->pers.pmoveMsec) * client->pers.pmoveMsec;
 	}
+
+	G_SendMatchInfo(ent);
 
 	if (client->wantsscore)
 	{
@@ -1737,11 +1760,25 @@ void SpectatorClientEndFrame(gentity_t *ent)
 		gclient_t *cl;
 		qboolean  do_respawn = qfalse;
 
-		// Players can respawn quickly in warmup
-		if (g_gamestate.integer != GS_PLAYING && ent->client->respawnTime <= level.timeCurrent &&
-		    ent->client->sess.sessionTeam != TEAM_SPECTATOR)
+		if (
+			// Players can instantly respawn when 'g_forcerespawn == -1'
+			(g_forcerespawn.integer == -1 && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
+			// Players can instantly respawn in warmup
+			|| (g_gamestate.integer != GS_PLAYING && ent->client->respawnTime <= level.timeCurrent &&
+			    ent->client->sess.sessionTeam != TEAM_SPECTATOR)
+			)
 		{
-			do_respawn = qtrue;
+			// XXX : delay respawn onto the next frame - this circumvents
+			// specific issues that currently occur when player die and respawn
+			// on the same server frame
+			if (ent->client->instantRespawnDelayTime == 0)
+			{
+				ent->client->instantRespawnDelayTime = level.time;
+			}
+			else if (level.time > ent->client->instantRespawnDelayTime)
+			{
+				do_respawn = qtrue;
+			}
 		}
 		else if (ent->client->sess.sessionTeam == TEAM_AXIS)
 		{
@@ -1948,6 +1985,13 @@ void WolfRevivePushEnt(gentity_t *self, gentity_t *other)
 {
 	vec3_t dir, push;
 
+	// apply push effect only every 50ms to match sv_fps 20 behavior
+	// scaling the speed to match higher framerates results in smaller push overall as friction has more effect on lower speeds
+	if ((self->client && self->client->lastRevivePushTime + 50 > level.time) || other->client->lastRevivePushTime + 50 > level.time)
+	{
+		return;
+	}
+
 	VectorSubtract(self->r.currentOrigin, other->r.currentOrigin, dir);
 	dir[2] = 0;
 	VectorNormalizeFast(dir);
@@ -1958,6 +2002,7 @@ void WolfRevivePushEnt(gentity_t *self, gentity_t *other)
 	{
 		VectorAdd(self->s.pos.trDelta, push, self->s.pos.trDelta);
 		VectorAdd(self->client->ps.velocity, push, self->client->ps.velocity);
+		self->client->lastRevivePushTime = level.time - (level.time % 50);
 	}
 
 	VectorScale(dir, -WR_PUSHAMOUNT, push);
@@ -1965,6 +2010,7 @@ void WolfRevivePushEnt(gentity_t *self, gentity_t *other)
 
 	VectorAdd(other->s.pos.trDelta, push, other->s.pos.trDelta);
 	VectorAdd(other->client->ps.velocity, push, other->client->ps.velocity);
+	other->client->lastRevivePushTime = level.time - (level.time % 50);
 }
 
 /**

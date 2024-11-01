@@ -53,7 +53,7 @@ static void SV_CloseDownload(client_t *cl);
  * the server with invalid connection IPs. With a challenge,
  * they must give a valid IP address.
  */
-void SV_GetChallenge(netadr_t from)
+void SV_GetChallenge(const netadr_t *from)
 {
 	int         i;
 	int         oldest;
@@ -92,7 +92,7 @@ void SV_GetChallenge(netadr_t from)
 	challenge = &svs.challenges[0];
 	for (i = 0 ; i < MAX_CHALLENGES ; i++, challenge++)
 	{
-		if (!challenge->connected && NET_CompareAdr(from, challenge->adr))
+		if (!challenge->connected && NET_CompareAdr(from, &challenge->adr))
 		{
 			break;
 		}
@@ -109,7 +109,7 @@ void SV_GetChallenge(netadr_t from)
 		challenge = &svs.challenges[oldest];
 
 		Com_RandomBytes(&challenge->challenge, sizeof(int32_t));
-		challenge->adr       = from;
+		challenge->adr       = *from;
 		challenge->firstTime = svs.time;
 		challenge->firstPing = 0;
 		challenge->time      = svs.time;
@@ -138,7 +138,7 @@ void SV_GetChallenge(netadr_t from)
  * So we let localhost connect since bots don't connect from SV_DirectConnect
  * where SV_isClientIPValidToConnect is done.
  */
-static qboolean SV_isClientIPValidToConnect(netadr_t from)
+static qboolean SV_isClientIPValidToConnect(const netadr_t *from)
 {
 	client_t *clientTmp;
 	int      count = 1;       // we count as the first one
@@ -170,7 +170,7 @@ static qboolean SV_isClientIPValidToConnect(netadr_t from)
 		}
 
 		// Don't compare the port - just the IP
-		if (NET_CompareBaseAdr(from, clientTmp->netchan.remoteAddress))
+		if (NET_CompareBaseAdr(from, &clientTmp->netchan.remoteAddress))
 		{
 			++count;
 			if (count > max)
@@ -192,7 +192,7 @@ static qboolean SV_isClientIPValidToConnect(netadr_t from)
  * @param[in] from
  * @param[in] userinfo
  */
-static qboolean SV_IsValidUserinfo(netadr_t from, const char *userinfo)
+static qboolean SV_IsValidUserinfo(const netadr_t *from, const char *userinfo)
 {
 	// FIXME: add some logging in for admins? we only do developer prints when a client is filtered
 	int version;
@@ -209,23 +209,30 @@ static qboolean SV_IsValidUserinfo(netadr_t from, const char *userinfo)
 			return qfalse;
 		}
 
+		if (!com_dedicated->integer)
+		{
+			NET_OutOfBandPrint(NS_SERVER, from, "print\n[err_dialog]Master must be a dedicated server.\n");
+			Com_DPrintf("    rejected ettv slave connection from %s because server is not dedicated.\n", NET_AdrToString(from));
+			return qfalse;
+		}
+
 		if (sv_etltv_maxslaves->integer <= 0)
 		{
-			NET_OutOfBandPrint(NS_SERVER, from, "print\nMaster must reserve slots with sv_etltv_maxslaves.\n");
+			NET_OutOfBandPrint(NS_SERVER, from, "print\n[err_dialog]Master must reserve slots with sv_etltv_maxslaves.\n");
 			Com_DPrintf("    rejected ettv slave connection from %s because sv_etltv_maxslaves is not set.\n", NET_AdrToString(from));
 			return qfalse;
 		}
 
 		if (!sv_etltv_password->string[0])
 		{
-			NET_OutOfBandPrint(NS_SERVER, from, "print\nMaster must set an sv_etltv_password.\n");
+			NET_OutOfBandPrint(NS_SERVER, from, "print\n[err_dialog]Master must set an sv_etltv_password.\n");
 			Com_DPrintf("    rejected ettv slave connection from %s because of empty sv_etltv_password.\n", NET_AdrToString(from));
 			return qfalse;
 		}
 
 		if (strcmp(Info_ValueForKey(userinfo, "masterpassword"), sv_etltv_password->string))
 		{
-			NET_OutOfBandPrint(NS_SERVER, from, "print\nInvalid master password.\n");
+			NET_OutOfBandPrint(NS_SERVER, from, "print\n[err_dialog]Invalid master password.\n");
 			Com_DPrintf("    rejected ettv slave connection from %s because password didn\'t match sv_etltv_password.\n", NET_AdrToString(from));
 			return qfalse;
 		}
@@ -265,7 +272,7 @@ static qboolean SV_IsValidUserinfo(netadr_t from, const char *userinfo)
  * @param[in] from
  * @param[in] userinfo
  */
-static qboolean SV_isValidClient(netadr_t from, const char *userinfo)
+static qboolean SV_isValidClient(const netadr_t *from, const char *userinfo)
 {
 	char *guid;
 
@@ -278,7 +285,7 @@ static qboolean SV_isValidClient(netadr_t from, const char *userinfo)
 	}
 
 	// server bots are always valid (with valid userinfo)
-	if (from.type == NA_BOT)
+	if (from->type == NA_BOT)
 	{
 		return qtrue;
 	}
@@ -316,12 +323,45 @@ static qboolean SV_isValidClient(netadr_t from, const char *userinfo)
 	return qtrue;
 }
 
+qboolean SV_CheckChallenge(const netadr_t *from)
+{
+	int i, challenge;
+
+	if (strlen(Cmd_Argv(1)) > 128)
+	{
+		SV_WriteAttackLog(va("SVC_Info: challenge length from %s exceeded, dropping request\n", NET_AdrToString(from)));
+		return qfalse;
+	}
+
+	challenge = Q_atoi(Cmd_Argv(1));
+
+	if (!NET_IsLocalAddress(from))
+	{
+		for (i = 0; i < MAX_CHALLENGES; i++)
+		{
+			if (NET_CompareAdr(from, &svs.challenges[i].adr))
+			{
+				if (challenge == svs.challenges[i].challenge && !svs.challenges[i].connected)
+				{
+					break;      // good
+				}
+			}
+		}
+		if (i == MAX_CHALLENGES)
+		{
+			return qfalse;
+		}
+	}
+
+	return qtrue;
+}
+
 /**
  * @brief A "connect" OOB command has been received
  *
  * @param[in] from
  */
-void SV_DirectConnect(netadr_t from)
+void SV_DirectConnect(const netadr_t *from)
 {
 	char     userinfo[MAX_INFO_STRING];
 	int      i, count = 0;
@@ -378,8 +418,8 @@ void SV_DirectConnect(netadr_t from)
 		//continue;
 		//}
 
-		if (NET_CompareBaseAdr(from, cl->netchan.remoteAddress)
-		    && (cl->netchan.qport == qport || from.port == cl->netchan.remoteAddress.port))
+		if (NET_CompareBaseAdr(from, &cl->netchan.remoteAddress)
+		    && (cl->netchan.qport == qport || from->port == cl->netchan.remoteAddress.port))
 		{
 			if ((svs.time - cl->lastConnectTime) < sv_reconnectlimit->integer * 1000)
 			{
@@ -400,7 +440,7 @@ void SV_DirectConnect(netadr_t from)
 
 		for (i = 0 ; i < MAX_CHALLENGES ; i++)
 		{
-			if (NET_CompareAdr(from, svs.challenges[i].adr))
+			if (NET_CompareAdr(from, &svs.challenges[i].adr))
 			{
 				if (challenge == svs.challenges[i].challenge)
 				{
@@ -462,9 +502,9 @@ void SV_DirectConnect(netadr_t from)
 		{
 			continue;
 		}
-		if (NET_CompareBaseAdr(from, cl->netchan.remoteAddress)
+		if (NET_CompareBaseAdr(from, &cl->netchan.remoteAddress)
 		    && (cl->netchan.qport == qport
-		        || from.port == cl->netchan.remoteAddress.port)
+		        || from->port == cl->netchan.remoteAddress.port)
 		    && !cl->demoClient)
 		{
 			Com_Printf("%s:reconnect\n", NET_AdrToString(from));
@@ -562,12 +602,16 @@ gotnewcl:
 	// build a new connection
 	// accept the new client
 	// this is the only place a client_t is EVER initialized
-	*newcl         = temp;
-	clientNum      = newcl - svs.clients;
-	newcl->gentity = SV_GentityNum(clientNum);
+	*newcl    = temp;
+	clientNum = newcl - svs.clients;
 
-	newcl->gentity->r.svFlags = 0; // clear client flags on new connection.
-	newcl->challenge          = challenge; // save the challenge
+	if (!svcls.isTVGame)
+	{
+		newcl->gentity            = SV_GentityNum(clientNum);
+		newcl->gentity->r.svFlags = 0; // clear client flags on new connection.
+	}
+
+	newcl->challenge = challenge;          // save the challenge
 	Q_strncpyz(newcl->guid, Info_ValueForKey(userinfo, "cl_guid"), sizeof(newcl->guid)); // save guid
 
 	// save the address
@@ -638,11 +682,18 @@ gotnewcl:
 
 	if (newcl->ettvClient)
 	{
-		newcl->ettvClientFrame = Com_Allocate(sizeof(ettvClientSnapshot_t*) * PACKET_BACKUP);
+		int clients = sv_maxclients->integer;
+
+		if (svcls.isTVGame)
+		{
+			clients = MAX_CLIENTS;
+		}
+
+		newcl->ettvClientFrame = Com_Allocate(sizeof(ettvClientSnapshot_t *) * PACKET_BACKUP);
 
 		for (i = 0; i < PACKET_BACKUP; i++)
 		{
-			newcl->ettvClientFrame[i] = calloc(sizeof(ettvClientSnapshot_t), sv_maxclients->integer);
+			newcl->ettvClientFrame[i] = calloc(sizeof(ettvClientSnapshot_t), clients);
 		}
 	}
 
@@ -719,7 +770,7 @@ void SV_DropClient(client_t *drop, const char *reason)
 
 		for (i = 0 ; i < MAX_CHALLENGES ; i++, challenge++)
 		{
-			if (NET_CompareAdr(drop->netchan.remoteAddress, challenge->adr))
+			if (NET_CompareAdr(&drop->netchan.remoteAddress, &challenge->adr))
 			{
 				challenge->connected = qfalse;
 				break;
@@ -863,13 +914,20 @@ void SV_SendClientGameState(client_t *client)
 		MSG_WriteDeltaEntity(&msg, &nullstate, base, qtrue);
 		if (client->ettvClient)
 		{
-			MSG_ETTV_WriteDeltaSharedEntity(&msg, &nullstateShared, baseShared, qtrue);
+			MSG_ETTV_WriteDeltaEntityShared(&msg, &nullstateShared, baseShared, qtrue);
 		}
 	}
 
 	MSG_WriteByte(&msg, svc_EOF);
 
-	MSG_WriteLong(&msg, client - svs.clients);
+	if (svcls.isTVGame)
+	{
+		MSG_WriteLong(&msg, svclc.clientNum);
+	}
+	else
+	{
+		MSG_WriteLong(&msg, client - svs.clients);
+	}
 
 	// write the checksum feed
 	MSG_WriteLong(&msg, sv.checksumFeed);
@@ -883,7 +941,7 @@ void SV_SendClientGameState(client_t *client)
 	Com_DPrintf("Sending %i bytes in gamestate to client: %i\n", msg.cursize, (int) (client - svs.clients));
 
 	// deliver this to the client
-	SV_SendMessageToClient(&msg, client);
+	SV_SendMessageToClient(&msg, client, qfalse);
 }
 
 /**
@@ -923,6 +981,7 @@ void SV_ClientEnterWorld(client_t *client, usercmd_t *cmd)
 	client->gentity = ent;
 
 	client->deltaMessage     = -1;
+	client->parseEntitiesNum = 0;
 	client->lastSnapshotTime = 0;   // generate a snapshot immediately
 
 	if (cmd)
@@ -1482,6 +1541,26 @@ static qboolean SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
 		return qtrue;
 	}
 
+	// Check if we have unsent fragments or queue already in the pipe and don't add to the issue (too much)
+	if (cl->netchan_start_queue)
+	{
+		netchan_buffer_t *next = cl->netchan_start_queue;
+		int              count = 0;
+		while (next)
+		{
+			count++;
+			next = next->next;
+			if (count > 20)
+			{
+				return qfalse;
+			}
+		}
+	}
+	if (cl->netchan.unsentFragments && cl->netchan.unsentLength > 10000)
+	{
+		return qfalse;
+	}
+
 	// Perform any reads that we need to
 	while (cl->downloadCurrentBlock - cl->downloadClientBlock < MAX_DOWNLOAD_WINDOW && cl->downloadSize != cl->downloadCount)
 	{
@@ -1882,7 +1961,7 @@ void SV_UserinfoChanged(client_t *cl)
 
 	// if the client is on the same subnet as the server and we aren't running an
 	// internet public server, assume they don't need a rate choke
-	if (Sys_IsLANAddress(cl->netchan.remoteAddress) && com_dedicated->integer != 2 && sv_lanForceRate->integer == 1)
+	if (Sys_IsLANAddress(&cl->netchan.remoteAddress) && com_dedicated->integer != 2 && sv_lanForceRate->integer == 1)
 	{
 		cl->rate = 99999;   // lans should not rate limit
 	}
@@ -1954,9 +2033,9 @@ void SV_UserinfoChanged(client_t *cl)
 	// - modified to always keep this consistent, instead of only
 	// when "ip" is 0-length, so users can't supply their own IP
 	//Com_DPrintf("Maintain IP in userinfo for '%s'\n", cl->name);
-	if (!NET_IsLocalAddress(cl->netchan.remoteAddress))
+	if (!NET_IsLocalAddress(&cl->netchan.remoteAddress))
 	{
-		Info_SetValueForKey(cl->userinfo, "ip", NET_AdrToString(cl->netchan.remoteAddress));
+		Info_SetValueForKey(cl->userinfo, "ip", NET_AdrToString(&cl->netchan.remoteAddress));
 	}
 	else
 	{
@@ -2229,8 +2308,15 @@ static void SV_UserMove(client_t *cl, msg_t *msg, qboolean delta)
 	usercmd_t cmds[MAX_PACKET_USERCMDS];
 	usercmd_t *cmd, *oldcmd;
 
+	cl->parseEntitiesNum = 0;
+
 	if (delta)
 	{
+		for (i = cl->messageAcknowledge; i < cl->netchan.outgoingSequence; i++)
+		{
+			cl->parseEntitiesNum += cl->frames[i & PACKET_MASK].num_entities;
+		}
+
 		cl->deltaMessage = cl->messageAcknowledge;
 	}
 	else
@@ -2275,9 +2361,22 @@ static void SV_UserMove(client_t *cl, msg_t *msg, qboolean delta)
 	    SV_DemoWriteClientUsercmd(cl, delta, cmdCount, cmds, key);
 	}
 	*/
+	if (cl->frames[cl->messageAcknowledge & PACKET_MASK].messageSent < 1)
+	{
+		Com_DPrintf("client %d: Message from old map\n", (int)(cl - svs.clients));
+		cl->parseEntitiesNum = 0;
+	}
+	else
+	{
+		// save time for ping calculation
+		cl->frames[cl->messageAcknowledge & PACKET_MASK].messageAcked = svs.time;
 
-	// save time for ping calculation
-	cl->frames[cl->messageAcknowledge & PACKET_MASK].messageAcked = svs.time;
+		if (!cl->frames[cl->messageAcknowledge & PACKET_MASK].parseEntities)
+		{
+			cl->deltaMessage     = -1;
+			cl->parseEntitiesNum = 0;
+		}
+	}
 
 	// if this is the first usercmd we have received
 	// this gamestate, put the client into the world

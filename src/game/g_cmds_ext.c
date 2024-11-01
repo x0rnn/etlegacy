@@ -137,7 +137,7 @@ static const cmd_reference_t aCommandInfo[] =
 	{ "nostamina",      CMD_USAGE_NO_INTERMISSION,   qtrue,       qfalse, Cmd_Nostamina_f,                     ":^7 Infinite stamina / charge power"                                                        },
 	{ "notarget",       CMD_USAGE_NO_INTERMISSION,   qtrue,       qfalse, Cmd_Notarget_f,                      ":^7 ???"                                                                                    },
 	{ "notready",       CMD_USAGE_ANY_TIME,          qfalse,      qtrue,  G_ready_cmd,                         ":^7 Sets your status to ^5not ready^7 to start a match"                                     },
-	{ "obj",            CMD_USAGE_NO_INTERMISSION,   qtrue,       qfalse, Cmd_SelectedObjective_f,             " <val>:^7 Selected Objective"                                                               },
+	{ "obj",            CMD_USAGE_ANY_TIME,          qtrue,       qfalse, Cmd_SelectedObjective_f,             " <val>:^7 Selected Objective"                                                               },
 	{ "pause",          CMD_USAGE_NO_INTERMISSION,   qtrue,       qfalse, G_pause_cmd,                         ":^7 Allows a team to pause a match"                                                         },
 	{ "players",        CMD_USAGE_ANY_TIME,          qtrue,       qtrue,  G_players_cmd,                       ":^7 Lists all active players and their IDs/information"                                     },
 	{ "rconAuth",       CMD_USAGE_ANY_TIME,          qtrue,       qfalse, Cmd_AuthRcon_f,                      ":^7 Client authentication"                                                                  },
@@ -515,8 +515,8 @@ void G_players_cmd(gentity_t *ent, unsigned int dwCommand, int fDump)
 	int       user_rate, user_snaps;
 	gclient_t *cl;
 	gentity_t *cl_ent;
-	char      guid[MAX_GUID_LENGTH + 1], n2[MAX_NETNAME], ready[16], ref[8], rate[32], version[64];
-	char      *s, *tc, *spec, *ign, *muted, *special, userinfo[MAX_INFO_STRING], *user_version;
+	char      guid[MAX_GUID_LENGTH + 1], n2[MAX_NETNAME], rate[32], version[64];
+	char      *s, *tc, *ready, *ref, *spec, *ign, *muted, *special, userinfo[MAX_INFO_STRING], *user_version;
 
 	if (g_gamestate.integer == GS_PLAYING)
 	{
@@ -559,9 +559,7 @@ void G_players_cmd(gentity_t *ent, unsigned int dwCommand, int fDump)
 		Q_strncpyz(n2, cl->pers.netname, sizeof(n2));
 		Q_CleanStr(n2);
 
-		n2[26]   = 0;
-		ref[0]   = 0;
-		ready[0] = 0;
+		n2[26] = 0;
 
 		// GUID
 		if (cl_ent->r.svFlags & SVF_BOT)
@@ -573,7 +571,7 @@ void G_players_cmd(gentity_t *ent, unsigned int dwCommand, int fDump)
 		{
 			// display only 8 char with * for humans
 			guid[8] = '\0';
-			strcat(guid, "*");
+			Q_strcat(guid, sizeof(guid), "*");
 		}
 
 		// Rate info
@@ -620,21 +618,29 @@ void G_players_cmd(gentity_t *ent, unsigned int dwCommand, int fDump)
 		{
 			if (cl->sess.sessionTeam == TEAM_SPECTATOR || cl->pers.connected == CON_CONNECTING)
 			{
-				strcpy(ready, ((ent) ? "^5--------^7 :" : "-------- :"));
+				ready = ent ? "^5--------^7 :" : "-------- :";
 			}
 			else if (cl->pers.ready || (g_entities[idnum].r.svFlags & SVF_BOT))
 			{
-				strcpy(ready, ((ent) ? "^3(READY)^7  :" : "(READY)  :"));
+				ready = ent ? "^3(READY)^7  :" : "(READY)  :";
 			}
 			else
 			{
-				strcpy(ready, ((ent) ? "^7NOTREADY^7 :" : "NOTREADY :"));
+				ready = ent ? "^7NOTREADY^7 :" : "NOTREADY :";
 			}
+		}
+		else
+		{
+			ready = "";
 		}
 
 		if (cl->sess.referee && !(cl_ent->r.svFlags & SVF_BOT))
 		{
-			strcpy(ref, "REF ");
+			ref = "REF ";
+		}
+		else
+		{
+			ref = "";
 		}
 
 		if (cl->sess.shoutcaster && !(cl_ent->r.svFlags & SVF_BOT))

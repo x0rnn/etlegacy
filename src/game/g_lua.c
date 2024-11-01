@@ -31,18 +31,18 @@ lua_vm_t *lVM[LUA_NUM_VM];
  *          if (input==0) return = -1
  *          if (input address is out of g_entities[] memory range) return -1;
  */
-static int C_gentity_ptr_to_entNum(unsigned long addr)
+static int C_gentity_ptr_to_entNum(uintptr_t addr)
 {
 	// no NULL address,
-	// address must also be in the range of the g_entities array memory space..
+	// address must also be in the range of the g_entities array memory space…
 	// address must also be pointing to the start of an entity (invalid if it points just somewhere halfway into the entity)
 	if (!addr ||
 	    (gentity_t *)addr < &g_entities[0] || (gentity_t *)addr > &g_entities[MAX_GENTITIES - 1] ||
-	    (addr - (unsigned long)&g_entities[0]) % sizeof(gentity_t) != 0)
+	    (addr - (uintptr_t)&g_entities[0]) % sizeof(gentity_t) != 0)
 	{
 		return -1;
 	}
-	return ((gentity_t *)addr - g_entities);
+	return (int)((gentity_t *)addr - g_entities);
 }
 
 /**
@@ -296,11 +296,11 @@ static int _et_trap_DropClient(lua_State *L)
 // clientnum = et.ClientNumberFromString( string )
 static int _et_ClientNumberFromString(lua_State *L)
 {
-	char *search = luaL_checkstring(L, 1);
-	int  pids[MAX_CLIENTS];
+	const char *search = luaL_checkstring(L, 1);
+	int        pids[MAX_CLIENTS];
 
 	// only send exact matches, otherwise -1
-	if (G_ClientNumbersFromString((char *) search, pids) == 1)
+	if (G_ClientNumbersFromString(search, pids) == 1)
 	{
 		lua_pushinteger(L, pids[0]);
 	}
@@ -553,7 +553,7 @@ static int _et_trap_FS_GetFileList(lua_State *L)
 	for (i = 0; i < numfiles; i++, filenameptr += filelen + 1)
 	{
 		filelen = strlen(filenameptr);
-		strcpy(filename, filenameptr);
+		Q_strncpyz(filename, filenameptr, sizeof(filename));
 
 		lua_pushstring(L, filename);
 		lua_rawseti(L, newTable, index++);
@@ -879,12 +879,14 @@ static int _et_GetCurrentWeapon(lua_State *L)
 	if (clientNum < 0 || clientNum >= MAX_CLIENTS)
 	{
 		luaL_error(L, "\"clientNum\" is out of bounds: %d", clientNum);
+		return 0;
 	}
 
 	ent = g_entities + clientNum;
 	if (!ent->client)
 	{
 		luaL_error(L, "\"clientNum\" \"%d\" is not a client entity", clientNum);
+		return 0;
 	}
 
 	client   = ent->client;
@@ -1032,6 +1034,11 @@ static const gentity_field_t gclient_fields[] =
 	_et_gclient_addfield(sess.prestige,                     FIELD_INT,                 FIELD_FLAG_READONLY),
 #endif
 	_et_gclient_addfield(sess.uci,                          FIELD_INT,                 0),
+
+#ifdef LEGACY_AUTH
+	_et_gclient_addfield(sess.authName,                     FIELD_STRING,              FIELD_FLAG_READONLY),
+	_et_gclient_addfield(sess.authId,                       FIELD_INT,                 FIELD_FLAG_READONLY),
+#endif
 
 	_et_gclient_addfield(sess.aWeaponStats,                 FIELD_WEAPONSTAT,          FIELD_FLAG_READONLY),
 
@@ -1296,10 +1303,9 @@ static void _et_gentity_getweaponstat(lua_State *L, weapon_stat_t *ws)
 
 gentity_t *G_Lua_CreateEntity(char *params)
 {
-	gentity_t *create;
-	char      *token;
-	char      *p = params;
-	char      key[MAX_TOKEN_CHARS], value[MAX_TOKEN_CHARS];
+	char *token;
+	char *p = params;
+	char key[MAX_TOKEN_CHARS], value[MAX_TOKEN_CHARS];
 
 	level.numSpawnVars     = 0;
 	level.numSpawnVarChars = 0;
@@ -1311,7 +1317,8 @@ gentity_t *G_Lua_CreateEntity(char *params)
 		{
 			break;
 		}
-		strcpy(key, token);
+
+		Q_strncpyz(key, token, sizeof(key));
 
 		token = COM_ParseExt(&p, qfalse);
 		if (!token[0])
@@ -1322,7 +1329,7 @@ gentity_t *G_Lua_CreateEntity(char *params)
 			return NULL;
 		}
 
-		strcpy(value, token);
+		Q_strncpyz(value, token, sizeof(value));
 
 		if (g_scriptDebug.integer)
 		{
@@ -1341,17 +1348,8 @@ gentity_t *G_Lua_CreateEntity(char *params)
 
 		level.numSpawnVars++;
 	}
-	create = G_SpawnGEntityFromSpawnVars();
 
-	//create->classname = "lua_spawn"; // make additional param?
-
-	if (!create)  // don't link NULL ents
-	{
-		return NULL;
-	}
-
-	trap_LinkEntity(create);
-	return create;
+	return G_SpawnGEntityFromSpawnVars();
 }
 
 // entnum = _et_G_Lua_CreateEntity( params )
@@ -1621,13 +1619,13 @@ static int _et_G_SetSpawnVar(lua_State *L)
 	return 0;
 }
 
-// variable = et.gentity_get( entnum, fieldname, arrayindex )
-static int _et_gentity_get(lua_State *L)
+// variable = et.gentity_get( entnum, fieldname, array_index )
+static int et_gentity_get(lua_State *L)
 {
 	gentity_t       *ent       = g_entities + (int)luaL_checkinteger(L, 1);
 	const char      *fieldname = luaL_checkstring(L, 2);
 	gentity_field_t *field     = _et_gentity_getfield(ent, (char *)fieldname);
-	unsigned long   addr;
+	uintptr_t       addr;
 
 	// break on invalid gentity field
 	if (!field)
@@ -1638,11 +1636,11 @@ static int _et_gentity_get(lua_State *L)
 
 	if (field->flags & FIELD_FLAG_GENTITY)
 	{
-		addr = (unsigned long)ent;
+		addr = (uintptr_t)ent;
 	}
 	else
 	{
-		addr = (unsigned long)ent->client;
+		addr = (uintptr_t)ent->client;
 	}
 
 	// for NULL entities, return nil (prevents server crashes!)
@@ -1674,8 +1672,8 @@ static int _et_gentity_get(lua_State *L)
 		return 1;
 	case FIELD_ENTITY:
 	{
-		// core: return the entity-number  of the entity that the pointer is pointing at.
-		int entNum = C_gentity_ptr_to_entNum(*(int *)addr);
+		// core: return the entity-number of the entity that the pointer is pointing at.
+		int entNum = C_gentity_ptr_to_entNum(*(uintptr_t *)addr);
 
 		if (entNum < 0)
 		{
@@ -1707,13 +1705,13 @@ static int _et_gentity_get(lua_State *L)
 	return 0;
 }
 
-// et.gentity_set( entnum, fieldname, arrayindex, value )
-static int _et_gentity_set(lua_State *L)
+// et.gentity_set( entnum, fieldname, array_index, value )
+static int et_gentity_set(lua_State *L)
 {
 	gentity_t       *ent       = g_entities + (int)luaL_checkinteger(L, 1);
 	const char      *fieldname = luaL_checkstring(L, 2);
 	gentity_field_t *field     = _et_gentity_getfield(ent, (char *)fieldname);
-	unsigned long   addr;
+	uintptr_t       addr;
 	const char      *buffer;
 
 	// break on invalid gentity field
@@ -1732,11 +1730,11 @@ static int _et_gentity_set(lua_State *L)
 
 	if (field->flags & FIELD_FLAG_GENTITY)
 	{
-		addr = (unsigned long)ent;
+		addr = (uintptr_t )ent;
 	}
 	else
 	{
-		addr = (unsigned long)ent->client;
+		addr = (uintptr_t)ent->client;
 	}
 
 	// for NULL entities, return nil (prevents server crashes!)
@@ -1987,7 +1985,7 @@ static int _et_G_HistoricalTrace(lua_State *L)
 
 /** @}*/ // doxygen addtogroup lua_etfncs
 
-// et library initialisation array
+// et library initialization array
 static const luaL_Reg etlib[] =
 {
 	// ET Library Calls
@@ -2064,8 +2062,8 @@ static const luaL_Reg etlib[] =
 	{ "trap_UnlinkEntity",       _et_trap_UnlinkEntity       },
 	{ "G_GetSpawnVar",           _et_G_GetSpawnVar           },
 	{ "G_SetSpawnVar",           _et_G_SetSpawnVar           },
-	{ "gentity_get",             _et_gentity_get             },
-	{ "gentity_set",             _et_gentity_set             },
+	{ "gentity_get",             et_gentity_get              },
+	{ "gentity_set",             et_gentity_set              },
 	{ "G_AddEvent",              _et_G_AddEvent              },
 	// Shaders
 	{ "G_ShaderRemap",           _et_G_ShaderRemap           },
@@ -2089,6 +2087,7 @@ qboolean G_LuaRunIsolated(const char *modName)
 {
 	int          freeVM, flen = 0;
 	static char  allowedModules[MAX_CVAR_VALUE_STRING];
+	char         filename[MAX_OSPATH];
 	char         *code, *signature;
 	fileHandle_t f;
 	lua_vm_t     *vm;
@@ -2107,72 +2106,80 @@ qboolean G_LuaRunIsolated(const char *modName)
 		return qfalse;
 	}
 
+	Q_strncpyz(filename, modName, sizeof(filename));
+
+	if (!COM_CompareExtension(filename, ".lua"))
+	{
+		Q_strcat(filename, sizeof(filename), ".lua");
+	}
+
 	Q_strncpyz(allowedModules, Q_strupr(lua_allowedModules.string), sizeof(allowedModules));
 
 	// try to open lua file
-	flen = trap_FS_FOpenFile(modName, &f, FS_READ);
+	flen = trap_FS_FOpenFile(filename, &f, FS_READ);
 	if (flen < 0)
 	{
-		G_Printf("%s API: %scan not open file '%s'\n", LUA_VERSION, S_COLOR_BLUE, modName);
+		G_Printf("%s API: %scan not open file '%s'\n", LUA_VERSION, S_COLOR_BLUE, filename);
+		return qfalse;
 	}
 	else if (flen > LUA_MAX_FSIZE)
 	{
 		// Let's not load arbitrarily big files to memory.
 		// If your lua file exceeds the limit, let me know.
-		G_Printf("%s API: %signoring file '%s' (too big)\n", LUA_VERSION, S_COLOR_BLUE, modName);
+		G_Printf("%s API: %signoring file '%s' (too big)\n", LUA_VERSION, S_COLOR_BLUE, filename);
 		trap_FS_FCloseFile(f);
+		return qfalse;
+	}
+
+	code = Com_Allocate(flen + 1);
+
+	if (code == NULL)
+	{
+		G_Error("%s API: %smemory allocation error for '%s' data\n", LUA_VERSION, S_COLOR_BLUE, filename);
+	}
+
+	trap_FS_Read(code, flen, f);
+	*(code + flen) = '\0';
+	trap_FS_FCloseFile(f);
+	signature = G_SHA1(code);
+
+	if (Q_stricmp(lua_allowedModules.string, "") && !strstr(allowedModules, signature))
+	{
+		// don't load disallowed lua modules into vm
+		Com_Dealloc(code); // fixed memory leaking in Lua API - thx ETPub/goesa
+		G_Printf("%s API: %sLua module [%s] [%s] disallowed by ACL\n", LUA_VERSION, S_COLOR_BLUE, filename, signature);
 	}
 	else
 	{
-		code = Com_Allocate(flen + 1);
+		// Init lua_vm_t struct
+		vm = (lua_vm_t *)Com_Allocate(sizeof(lua_vm_t));
 
-		if (code == NULL)
+		if (vm == NULL)
 		{
-			G_Error("%s API: %smemory allocation error for '%s' data\n", LUA_VERSION, S_COLOR_BLUE, modName);
+			G_Error("%s API: %svm memory allocation error for %s data\n", LUA_VERSION, S_COLOR_BLUE, filename);
 		}
 
-		trap_FS_Read(code, flen, f);
-		*(code + flen) = '\0';
-		trap_FS_FCloseFile(f);
-		signature = G_SHA1(code);
+		vm->id = -1;
+		Q_strncpyz(vm->file_name, filename, sizeof(vm->file_name));
+		Q_strncpyz(vm->mod_name, "", sizeof(vm->mod_name));
+		Q_strncpyz(vm->mod_signature, signature, sizeof(vm->mod_signature));
+		vm->code      = code;
+		vm->code_size = flen;
+		vm->err       = 0;
 
-		if (Q_stricmp(lua_allowedModules.string, "") && !strstr(allowedModules, signature))
+		// Start lua virtual machine
+		if (G_LuaStartVM(vm))
 		{
-			// don't load disallowed lua modules into vm
-			Com_Dealloc(code); // fixed memory leaking in Lua API - thx ETPub/goesa
-			G_Printf("%s API: %sLua module [%s] [%s] disallowed by ACL\n", LUA_VERSION, S_COLOR_BLUE, modName, signature);
+			vm->id      = freeVM;
+			lVM[freeVM] = vm;
+			return qtrue;
 		}
 		else
 		{
-			// Init lua_vm_t struct
-			vm = (lua_vm_t *)Com_Allocate(sizeof(lua_vm_t));
-
-			if (vm == NULL)
-			{
-				G_Error("%s API: %svm memory allocation error for %s data\n", LUA_VERSION, S_COLOR_BLUE, modName);
-			}
-
-			vm->id = -1;
-			Q_strncpyz(vm->file_name, modName, sizeof(vm->file_name));
-			Q_strncpyz(vm->mod_name, "", sizeof(vm->mod_name));
-			Q_strncpyz(vm->mod_signature, signature, sizeof(vm->mod_signature));
-			vm->code      = code;
-			vm->code_size = flen;
-			vm->err       = 0;
-
-			// Start lua virtual machine
-			if (G_LuaStartVM(vm))
-			{
-				vm->id      = freeVM;
-				lVM[freeVM] = vm;
-				return qtrue;
-			}
-			else
-			{
-				G_LuaStopVM(vm);
-			}
+			G_LuaStopVM(vm);
 		}
 	}
+
 	return qfalse;
 }
 
@@ -2183,15 +2190,59 @@ qboolean G_LuaRunIsolated(const char *modName)
  */
 qboolean G_LuaInit(void)
 {
-	int  i, num_vm = 0, len;
-	char buff[MAX_CVAR_VALUE_STRING], *crt;
+	int          i, num_vm = 0, len;
+	char         buff[MAX_CVAR_VALUE_STRING], *crt, *list, *pList;
+	fileHandle_t f;
 
 	for (i = 0; i < LUA_NUM_VM; i++)
 	{
 		lVM[i] = NULL;
 	}
 
-	if (lua_modules.string[0])
+	if (g_luaModuleList.string[0])
+	{
+		if (lua_modules.string[0])
+		{
+			G_Printf("%s API: %slua_modules cvar will be ignored since g_luaModuleList is set\n", LUA_VERSION, S_COLOR_BLUE);
+		}
+
+		len = trap_FS_FOpenFile(g_luaModuleList.string, &f, FS_READ);
+		if (len < 0)
+		{
+			G_Printf("%s API: %scan not open file '%s'\n", LUA_VERSION, S_COLOR_BLUE, g_luaModuleList.string);
+			return qfalse;
+		}
+
+		list = Com_Allocate(len + 1);
+
+		if (list == NULL)
+		{
+			G_Error("%s API: %smemory allocation error for '%s' data\n", LUA_VERSION, S_COLOR_BLUE, g_luaModuleList.string);
+			return qfalse;
+		}
+
+		trap_FS_Read(list, len, f);
+		*(list + len) = '\0';
+		trap_FS_FCloseFile(f);
+
+		pList = list;
+		while ((crt = COM_Parse(&pList)) && *crt)
+		{
+			if (num_vm >= LUA_NUM_VM)
+			{
+				G_Printf("%s API: %stoo many lua files specified, only the first %d have been loaded\n", LUA_VERSION, S_COLOR_BLUE, LUA_NUM_VM);
+				break;
+			}
+
+			if (G_LuaRunIsolated(crt))
+			{
+				num_vm++;
+			}
+		}
+
+		Com_Dealloc(list);
+	}
+	else if (lua_modules.string[0])
 	{
 		Q_strncpyz(buff, lua_modules.string, sizeof(buff));
 		len = strlen(buff);
@@ -2659,7 +2710,6 @@ static void registerSurfaceConstants(lua_vm_t *vm)
 	lua_regconstinteger(vm->L, SURF_NODLIGHT);
 	lua_regconstinteger(vm->L, SURF_WOOD);
 	lua_regconstinteger(vm->L, SURF_GRASS);
-	lua_regconstinteger(vm->L, SURF_CERAMIC);
 	lua_regconstinteger(vm->L, SURF_GRAVEL);
 	lua_regconstinteger(vm->L, SURF_GLASS);
 	lua_regconstinteger(vm->L, SURF_SNOW);
@@ -3828,6 +3878,72 @@ void G_LuaHook_SpawnEntitiesFromString()
 	}
 }
 
+/*
+ * G_LuaHook_Chat
+ * et_Chat( sender, receiver, text ) callback
+ */
+const char *G_LuaHook_Chat(int sender, int receiver, const char *message, char *buffer, size_t bufsize)
+{
+	int        i;
+	lua_vm_t   *vm;
+	const char *result, *newMessage;
+
+	newMessage = message;
+	for (i = 0; i < LUA_NUM_VM; i++)
+	{
+		vm = lVM[i];
+		if (vm)
+		{
+			if (vm->id < 0) //|| vm->err)
+			{
+				continue;
+			}
+			if (!G_LuaGetNamedFunction(vm, "et_Chat"))
+			{
+				continue;
+			}
+			// Arguments
+			lua_pushinteger(vm->L, sender);
+			lua_pushinteger(vm->L, receiver);
+			lua_pushstring(vm->L, newMessage);
+			// Call
+			if (!G_LuaCall(vm, "et_Chat", 3, 2))
+			{
+				//G_LuaStopVM(vm);
+				continue;
+			}
+			// Return values
+			if (lua_isinteger(vm->L, -2) &&
+			    lua_tointeger(vm->L, -2) != qfalse &&
+			    lua_isstring(vm->L, -1))
+			{
+				result = luaL_checkstring(vm->L, -1);
+				Q_strncpyz(buffer, result, bufsize);
+				newMessage = buffer;
+			}
+			lua_pop(vm->L, 2);
+		}
+	}
+	return newMessage;
+}
+
 /** @} */ // doxygen addtogroup lua_etevents
+
+void Svcmd_LoadLua_f(void)
+{
+	char buffer[MAX_QPATH];
+	int  i = 1;
+	if (trap_Argc() < 2)
+	{
+		return;
+	}
+
+	for (; i < trap_Argc(); i++)
+	{
+		buffer[0] = '\0';
+		trap_Argv(i, buffer, sizeof(buffer));
+		G_LuaRunIsolated(buffer);
+	}
+}
 
 #endif // FEATURE_LUA

@@ -46,6 +46,8 @@ extern qboolean  g_waitingForKey;
 int dll_com_trapGetValue;
 int dll_trap_SysFlashWindow;
 int dll_trap_CommandComplete;
+int dll_trap_CmdBackup_Ext;
+int dll_trap_MatchPaused;
 
 /**
  * @brief This is the only way control passes into the module.
@@ -91,15 +93,6 @@ Q_EXPORT intptr_t vmMain(intptr_t command, intptr_t arg0, intptr_t arg1, intptr_
 	case CG_MOUSE_EVENT:
 		cgDC.cursorx = cgs.cursorX;
 		cgDC.cursory = cgs.cursorY;
-		// when the limbopanel is open, we want the cursor to be able to move all the way to the right edge of the screen..
-		// ... same for the debriefing screen
-		if (cg.showGameView || cgs.dbShowing)
-		{
-			if (!Ccg_Is43Screen())
-			{
-				cgDC.cursorx *= cgs.adr43;
-			}
-		}
 		CG_MouseEvent(arg0, arg1);
 		return 0;
 	case CG_EVENT_HANDLING:
@@ -138,6 +131,7 @@ vmCvar_t cg_drawCrosshair;
 vmCvar_t cg_drawCrosshairFade;
 vmCvar_t cg_drawCrosshairPickups;
 vmCvar_t cg_drawSpectatorNames;
+vmCvar_t cg_drawHintFade;
 vmCvar_t cg_weaponCycleDelay;
 vmCvar_t cg_cycleAllWeaps;
 vmCvar_t cg_useWeapsForZoom;
@@ -161,7 +155,10 @@ vmCvar_t cg_brassTime;
 vmCvar_t cg_letterbox;
 vmCvar_t cg_drawGun;
 vmCvar_t cg_weapAnims;
+vmCvar_t cg_weapBankCollisions;
+vmCvar_t cg_weapSwitchNoAmmoSounds;
 vmCvar_t cg_gun_frame;
+vmCvar_t cg_gunFovOffset;
 vmCvar_t cg_gun_x;
 vmCvar_t cg_gun_y;
 vmCvar_t cg_gun_z;
@@ -172,6 +169,8 @@ vmCvar_t cg_tracerSpeed;
 vmCvar_t cg_autoswitch;
 vmCvar_t cg_fov;
 vmCvar_t cg_muzzleFlash;
+vmCvar_t cg_muzzleFlashDlight;
+vmCvar_t cg_muzzleFlashScale;
 vmCvar_t cg_zoomStepSniper;
 vmCvar_t cg_zoomDefaultSniper;
 vmCvar_t cg_thirdPerson;
@@ -214,6 +213,7 @@ vmCvar_t cg_messageType;
 
 vmCvar_t cg_timescale;
 
+vmCvar_t cg_spritesFollowHeads;
 vmCvar_t cg_voiceSpriteTime;
 
 vmCvar_t cg_drawNotifyText;
@@ -314,6 +314,7 @@ vmCvar_t cg_fireteamSprites;
 
 vmCvar_t cg_weapaltReloads;
 vmCvar_t cg_weapaltSwitches;
+vmCvar_t cg_weapaltMgAutoProne;
 
 vmCvar_t cg_sharetimerText;
 
@@ -321,6 +322,7 @@ vmCvar_t cg_simpleItems;
 vmCvar_t cg_simpleItemsScale;
 
 vmCvar_t cg_automapZoom;
+vmCvar_t cg_autoCmd;
 
 vmCvar_t cg_popupFadeTime;
 vmCvar_t cg_popupStayTime;
@@ -357,6 +359,7 @@ vmCvar_t cg_shoutcastGrenadeTrail;
 vmCvar_t cg_activateLean;
 
 vmCvar_t cg_drawBreathPuffs;
+vmCvar_t cg_drawAirstrikePlanes;
 
 vmCvar_t cg_customFont1;
 vmCvar_t cg_customFont2;
@@ -388,11 +391,15 @@ static cvarTable_t cvarTable[] =
 	{ &cg_autoswitch,               "cg_autoswitch",               "2",           CVAR_ARCHIVE,                 0 },
 	{ &cg_drawGun,                  "cg_drawGun",                  "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_weapAnims,                "cg_weapAnims",                "15",          CVAR_ARCHIVE,                 0 },
+	{ &cg_weapBankCollisions,       "cg_weapBankCollisions",       "0",           CVAR_ARCHIVE,                 0 },
+	{ &cg_weapSwitchNoAmmoSounds,   "cg_weapSwitchNoAmmoSounds",   "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_gun_frame,                "cg_gun_frame",                "0",           CVAR_TEMP,                    0 },
 	{ &cg_zoomDefaultSniper,        "cg_zoomDefaultSniper",        "20",          CVAR_ARCHIVE,                 0 }, // changed per atvi req
 	{ &cg_zoomStepSniper,           "cg_zoomStepSniper",           "2",           CVAR_ARCHIVE,                 0 },
 	{ &cg_fov,                      "cg_fov",                      "90",          CVAR_ARCHIVE,                 0 },
 	{ &cg_muzzleFlash,              "cg_muzzleFlash",              "1",           CVAR_ARCHIVE,                 0 },
+	{ &cg_muzzleFlashDlight,        "cg_muzzleFlashDlight",        "0",           CVAR_ARCHIVE,                 0 },
+	{ &cg_muzzleFlashScale,         "cg_muzzleFlashScale",         "0.8",         CVAR_ARCHIVE,                 0 },
 	{ &cg_letterbox,                "cg_letterbox",                "0",           CVAR_TEMP,                    0 },
 	{ &cg_shadows,                  "cg_shadows",                  "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_gibs,                     "cg_gibs",                     "1",           CVAR_ARCHIVE,                 0 },
@@ -403,15 +410,17 @@ static cvarTable_t cvarTable[] =
 	{ &cg_drawStatus,               "cg_drawStatus",               "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_drawFPS,                  "cg_drawFPS",                  "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_drawCrosshair,            "cg_drawCrosshair",            "1",           CVAR_ARCHIVE,                 0 },
-	{ &cg_drawCrosshairFade,        "cg_drawCrosshairFade",        "1000",        CVAR_ARCHIVE,                 0 },
+	{ &cg_drawCrosshairFade,        "cg_drawCrosshairFade",        "250",         CVAR_ARCHIVE,                 0 },
 	{ &cg_drawCrosshairPickups,     "cg_drawCrosshairPickups",     "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_drawSpectatorNames,       "cg_drawSpectatorNames",       "2",           CVAR_ARCHIVE,                 0 },
+	{ &cg_drawHintFade,             "cg_drawHintFade",             "250",         CVAR_ARCHIVE,                 0 },
 	{ &cg_useWeapsForZoom,          "cg_useWeapsForZoom",          "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_weaponCycleDelay,         "cg_weaponCycleDelay",         "150",         CVAR_ARCHIVE,                 0 },
 	{ &cg_cycleAllWeaps,            "cg_cycleAllWeaps",            "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_brassTime,                "cg_brassTime",                "2500",        CVAR_ARCHIVE,                 0 },
 	{ &cg_markTime,                 "cg_markTime",                 "20000",       CVAR_ARCHIVE,                 0 },
 	{ &cg_bloodPuff,                "cg_bloodPuff",                "1",           CVAR_ARCHIVE,                 0 },
+	{ &cg_gunFovOffset,             "cg_gunFovOffset",             "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_gun_x,                    "cg_gunX",                     "0",           CVAR_TEMP,                    0 },
 	{ &cg_gun_y,                    "cg_gunY",                     "0",           CVAR_TEMP,                    0 },
 	{ &cg_gun_z,                    "cg_gunZ",                     "0",           CVAR_TEMP,                    0 },
@@ -469,6 +478,7 @@ static cvarTable_t cvarTable[] =
 	{ &pmove_fixed,                 "pmove_fixed",                 "0",           CVAR_SYSTEMINFO,              0 },
 	{ &pmove_msec,                  "pmove_msec",                  "8",           CVAR_SYSTEMINFO,              0 },
 
+	{ &cg_spritesFollowHeads,       "cg_spritesFollowHeads",       "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_voiceSpriteTime,          "cg_voiceSpriteTime",          "6000",        CVAR_ARCHIVE,                 0 },
 
 	{ &cg_teamChatsOnly,            "cg_teamChatsOnly",            "0",           CVAR_ARCHIVE,                 0 },
@@ -590,6 +600,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_simpleItems,              "cg_simpleItems",              "0",           CVAR_ARCHIVE,                 0 }, // Bugged atm
 	{ &cg_simpleItemsScale,         "cg_simpleItemsScale",         "1.0",         CVAR_ARCHIVE,                 0 },
 	{ &cg_automapZoom,              "cg_automapZoom",              "5.159",       CVAR_ARCHIVE,                 0 },
+	{ &cg_autoCmd,                  "cg_autoCmd",                  "",            CVAR_TEMP,                    0 },
 	{ &cg_popupFadeTime,            "cg_popupFadeTime",            "2500",        CVAR_ARCHIVE,                 0 },
 	{ &cg_popupStayTime,            "cg_popupStayTime",            "2000",        CVAR_ARCHIVE,                 0 },
 	{ &cg_popupTime,                "cg_popupTime",                "0",           CVAR_ARCHIVE,                 0 },
@@ -598,6 +609,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_popupXPGainTime,          "cg_popupXPGainTime",          "200",         CVAR_ARCHIVE,                 0 },
 	{ &cg_weapaltReloads,           "cg_weapaltReloads",           "0",           CVAR_ARCHIVE,                 0 },
 	{ &cg_weapaltSwitches,          "cg_weapaltSwitches",          "1",           CVAR_ARCHIVE,                 0 },
+	{ &cg_weapaltMgAutoProne,       "cg_weapaltMgAutoProne",       "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_sharetimerText,           "cg_sharetimerText",           "",            CVAR_ARCHIVE,                 0 },
 
 	// Fonts
@@ -613,7 +625,7 @@ static cvarTable_t cvarTable[] =
 
 	{ &cg_drawUnit,                 "cg_drawUnit",                 "0",           CVAR_ARCHIVE,                 0 },
 
-	{ &cg_visualEffects,            "cg_visualEffects",            "1",           CVAR_ARCHIVE,                 0 }, // Draw visual effects (i.e : airstrike plane, debris ...)
+	{ &cg_visualEffects,            "cg_visualEffects",            "1",           CVAR_ARCHIVE,                 0 }, // (e.g. : smoke, debris, ...)
 	{ &cg_bannerTime,               "cg_bannerTime",               "10000",       CVAR_ARCHIVE,                 0 },
 
 	{ &cg_shoutcastTeamNameRed,     "cg_shoutcastTeamNameRed",     "Axis",        CVAR_ARCHIVE,                 0 },
@@ -624,6 +636,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_activateLean,             "cg_activateLean",             "0",           CVAR_ARCHIVE,                 0 },
 
 	{ &cg_drawBreathPuffs,          "cg_drawBreathPuffs",          "1",           CVAR_ARCHIVE,                 0 },
+	{ &cg_drawAirstrikePlanes,      "cg_drawAirstrikePlanes",      "1",           CVAR_ARCHIVE,                 0 },
 
 	{ &cg_drawSpawnpoints,          "cg_drawSpawnpoints",          "0",           CVAR_ARCHIVE,                 0 },
 
@@ -636,7 +649,7 @@ static cvarTable_t cvarTable[] =
 	{ &cg_crosshairPulse,           "cg_crosshairPulse",           "1",           CVAR_ARCHIVE,                 0 },
 	{ &cg_crosshairHealth,          "cg_crosshairHealth",          "0",           CVAR_ARCHIVE,                 0 },
 
-	{ &cg_commandMapTime,           "cg_commandMapTime",           "250",         CVAR_ARCHIVE,                 0 },
+	{ &cg_commandMapTime,           "cg_commandMapTime",           "0",           CVAR_ARCHIVE,                 0 },
 };
 
 static const unsigned int cvarTableSize = sizeof(cvarTable) / sizeof(cvarTable[0]);
@@ -829,25 +842,54 @@ void CG_RestoreProfile(void)
 }
 
 /**
- * @brief Try to exec a cfg file if it is found
+ * @brief Checks whether a cfg file exists or not
  * @param[in] filename
- * @return
+ * @return qtrue if file exists
  */
-qboolean CG_execFile(const char *filename)
+qboolean CG_ConfigFileExists(const char *filename)
 {
 	int handle = trap_PC_LoadSource(va("%s.cfg", filename));
-
 	trap_PC_FreeSource(handle);
+	return handle ? qtrue : qfalse;
+}
 
-	if (!handle)
-	{
-		// file not found
-		return qfalse;
-	}
-
+/**
+ * @brief Execs a .cfg file
+ * @param[in] filename
+ */
+void CG_execFile(const char *filename)
+{
 	trap_SendConsoleCommand(va("exec %s.cfg\n", filename));
+}
 
-	return qtrue;
+/**
+ * @brief Executes map-specific autoexec files
+ * @param[in] cheats
+ */
+void CG_MapAutoexec(qboolean cheats)
+{
+	char       filename[128];
+	const char *basename = cheats ? "autoexec_devmap_" : "autoexec_";
+
+	Q_strncpyz(filename, basename, sizeof(filename));
+	Q_strcat(filename, sizeof(filename), cgs.rawmapname);
+
+	if (CG_ConfigFileExists(filename))
+	{
+		CG_execFile(filename);
+		cg.mapConfigLoaded = qtrue;
+	}
+	else
+	{
+		Q_strncpyz(filename, basename, sizeof(filename));
+		Q_strcat(filename, sizeof(filename), "default");
+
+		if (CG_ConfigFileExists(filename))
+		{
+			CG_execFile(filename);
+			cg.mapConfigLoaded = qtrue;
+		}
+	}
 }
 
 /**
@@ -885,11 +927,11 @@ void CG_setClientFlags(void)
  */
 int CG_CrosshairPlayer(void)
 {
-	if (cg.time > (cg.crosshairClientTime + 1000))
+	if (cg.time > (cg.crosshairEntTime + 1000))
 	{
 		return -1;
 	}
-	return cg.crosshairClientNum;
+	return cg.crosshairEntNum;
 }
 
 /**
@@ -1418,6 +1460,7 @@ static void CG_RegisterSounds(void)
 		speaker->noise = trap_S_RegisterSound(speaker->filename, qfalse);
 	}
 
+	cgs.media.noAmmoSound      = trap_S_RegisterSound("sound/weapons/misc/fire_dry.wav", qfalse);
 	cgs.media.noFireUnderwater = trap_S_RegisterSound("sound/weapons/misc/fire_water.wav", qfalse);
 	cgs.media.selectSound      = trap_S_RegisterSound("sound/weapons/misc/change.wav", qfalse);
 	cgs.media.landHurt         = trap_S_RegisterSound("sound/player/land_hurt.wav", qfalse);
@@ -2277,7 +2320,7 @@ const char *CG_ConfigString(int index)
 	{
 		CG_Error("CG_ConfigString: bad index: %i\n", index);
 	}
-	return cgs.gameState.stringData + cgs.gameState.stringOffsets[index];
+	return cgs.currentGameState.stringData + cgs.currentGameState.stringOffsets[index];
 }
 
 /**
@@ -2708,6 +2751,8 @@ static ID_INLINE void CG_SetupExtensions(void)
 
 		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_SysFlashWindow, "trap_SysFlashWindow_Legacy");
 		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CommandComplete, "trap_CommandComplete_Legacy");
+		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_CmdBackup_Ext, "trap_CmdBackup_Ext_Legacy");
+		CG_SetupExtensionTrap(value, MAX_CVAR_VALUE_STRING, &dll_trap_MatchPaused, "trap_MatchPaused_Legacy");
 	}
 }
 
@@ -2785,6 +2830,10 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 	cgs.r43da       = RATIO43 * 1.0f / cgs.glconfig.windowAspect;  // (4/3) / aspectratio
 	cgs.wideXoffset = (cgs.glconfig.windowAspect > RATIO43) ? (640.0f * cgs.adr43 - 640.0f) * 0.5f : 0.0f;
 
+	// default to visible mouse cursor so that we have cursor on intermission,
+	// in case we never call event handling change during a match
+	cgDC.cursorVisible = qtrue;
+
 	// DEBUG
 	//CG_Printf("Screen[%f][%f]: as: %f   adr43: %f  r43da: %f off: %f\n", cgs.screenXScale, cgs.screenYScale, cgs.glconfig.windowAspect, cgs.adr43, cgs.r43da, cgs.wideXoffset);
 
@@ -2801,6 +2850,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 	cgs.ccCurrentCamObjective = -2;
 
 	CG_SetupExtensions();
+	trap_CmdBackup_Ext();
 
 	// Background images on the loading screen were not visible on the first call
 	trap_R_SetColor(NULL);
@@ -2828,7 +2878,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 	}
 
 	// get the gamestate from the client system
-	trap_GetGameState(&cgs.gameState);
+	trap_GetGameState(&cgs.currentGameState);
 
 	cg.warmupCount = -1;
 
@@ -2844,9 +2894,13 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 	CG_AssetCache();
 
 	// try execing map autoexec scripts
-	if (!CG_execFile(va("autoexec_%s", cgs.rawmapname)))
+	CG_MapAutoexec(cgs.sv_cheats);
+
+	// if cheats are enabled but devmap-specific configs aren't found,
+	// fallback to regular configs
+	if (cgs.sv_cheats && !cg.mapConfigLoaded)
 	{
-		CG_execFile("autoexec_default");
+		CG_MapAutoexec(qfalse);
 	}
 
 	cgs.campaignInfoLoaded = qfalse;
@@ -2878,7 +2932,7 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 	}
 	else
 	{
-		sprintf(versionString, "%i", clientVersion);
+		Com_sprintf(versionString, sizeof(versionString), "%i", clientVersion);
 		trap_Cvar_Set("cg_etVersion", va(PRODUCT_LABEL " v%c.%s %s", versionString[0], versionString + 1, CPUSTRING));
 	}
 
@@ -2997,9 +3051,6 @@ void CG_Init(int serverMessageNum, int serverCommandSequence, int clientNum, qbo
 
 	CG_ParseModInfo();
 
-	cg.crosshairMine = -1;
-	cg.crosshairDyna = -1;
-
 	//CG_Printf("Time taken: %i\n", trap_Milliseconds() - startat);
 
 #ifdef FEATURE_EDV
@@ -3112,17 +3163,23 @@ void QDECL CG_WriteToLog(const char *fmt, ...)
 
 int CG_RoundTime(qtime_t *qtime)
 {
-	int msec = cgs.timelimit * 60000.f;
+	int msec;
+	int seconds;
+	int mins;
+	int hours;
+	int tens;
+
+	msec = cgs.timelimit * 60000.f;
 	if (cgs.gamestate == GS_PLAYING)
 	{
 		msec -= cg.time - cgs.levelStartTime;
 	}
 
-	int seconds = msec / 1000;
-	int mins    = seconds / 60;
-	int hours   = mins / 60;
-	seconds -= mins * 60;
-	int tens = seconds / 10;
+	seconds        = msec / 1000;
+	mins           = seconds / 60;
+	hours          = mins / 60;
+	seconds       -= mins * 60;
+	tens           = seconds / 10;
 	seconds       -= tens * 10;
 	seconds        = Q_atoi(va("%i%i", tens, seconds));
 	qtime->tm_sec  = seconds;
@@ -3130,4 +3187,25 @@ int CG_RoundTime(qtime_t *qtime)
 	qtime->tm_hour = hours;
 
 	return msec;
+}
+
+/**
+ * @brief CG_IsVersionCompatible
+ * @param[in] current
+ * @param[in] minimum
+ * @return
+ */
+qboolean CG_IsVersionCompatible(version_t *current, version_t *minimum)
+{
+	if (current->major != minimum->major)
+	{
+		return current->major > minimum->major;
+	}
+
+	if (current->minor != minimum->minor)
+	{
+		return current->minor > minimum->minor;
+	}
+
+	return current->patch >= minimum->patch;
 }

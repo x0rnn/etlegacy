@@ -138,6 +138,7 @@ cvar_t *r_overBrightBits;
 cvar_t *r_mapOverBrightBits;
 
 cvar_t *r_debugSurface;
+cvar_t *r_debugShaderSurfaceFlags;
 cvar_t *r_simpleMipMaps;
 
 cvar_t *r_showImages;
@@ -171,6 +172,8 @@ cvar_t *r_gfxInfo;
 
 cvar_t *r_scale;
 
+cvar_t *r_scalesvg;
+
 /**
  * @brief This function is responsible for initializing a valid OpenGL subsystem
  *
@@ -191,26 +194,29 @@ static void InitOpenGL(void)
 
 	if (glConfig.vidWidth == 0)
 	{
+		char  glConfigString[1024] = { 0 };
 		char  renderer_buffer[1024];
 		GLint temp;
 
 		Com_Memset(&glConfig, 0, sizeof(glConfig));
 
-		windowContext_t context;
-		Com_Memset(&context, 0, sizeof(windowContext_t));
+		Info_SetValueForKey(glConfigString, "type", "opengl");
+		Info_SetValueForKey(glConfigString, "major", "1");
+		Info_SetValueForKey(glConfigString, "minor", "1");
+
 		// If we are using FBO's then disable multisampling on the main screen buffer
 		if (r_fbo->integer)
 		{
-			context.samples = 0;
+			Info_SetValueForKey(glConfigString, "samples", "0");
 		}
 		else
 		{
-			context.samples = r_ext_multisample->integer;
+			Info_SetValueForKey(glConfigString, "samples", va("%d", r_ext_multisample->integer));
 		}
 
-		ri.GLimp_Init(&glConfig, &context);
+		ri.GLimp_Init(&glConfig, glConfigString);
 
-		strcpy(renderer_buffer, glConfig.renderer_string);
+		Q_strncpyz(renderer_buffer, glConfig.renderer_string, sizeof(renderer_buffer));
 		Q_strlwr(renderer_buffer);
 
 		// OpenGL driver constants
@@ -223,14 +229,11 @@ static void InitOpenGL(void)
 			glConfig.maxTextureSize = 0;
 		}
 
-		ri.CL_SetScaling(1.0f);
-
 		if (r_scale->value)
 		{
-			float scale = Com_Clamp(0.2f, 4.f, r_scale->value);
+			const float scale = Com_Clamp(0.2f, 4.f, r_scale->value);
 			glConfig.vidWidth  *= scale;
 			glConfig.vidHeight *= scale;
-			ri.CL_SetScaling(scale);
 		}
 	}
 
@@ -247,7 +250,7 @@ static void InitOpenGL(void)
 void GL_CheckErrors(void)
 {
 	unsigned int err;
-	char         s[64];
+	char         *s;
 
 	if (r_ignoreGLErrors->integer)
 	{
@@ -262,29 +265,29 @@ void GL_CheckErrors(void)
 	switch (err)
 	{
 	case GL_INVALID_ENUM:
-		strcpy(s, "GL_INVALID_ENUM");
+		s = "GL_INVALID_ENUM";
 		break;
 	case GL_INVALID_VALUE:
-		strcpy(s, "GL_INVALID_VALUE");
+		s = "GL_INVALID_VALUE";
 		break;
 	case GL_INVALID_OPERATION:
-		strcpy(s, "GL_INVALID_OPERATION");
+		s = "GL_INVALID_OPERATION";
 		break;
 	case GL_STACK_OVERFLOW:
-		strcpy(s, "GL_STACK_OVERFLOW");
+		s = "GL_STACK_OVERFLOW";
 		break;
 	case GL_STACK_UNDERFLOW:
-		strcpy(s, "GL_STACK_UNDERFLOW");
+		s = "GL_STACK_UNDERFLOW";
 		break;
 	case GL_OUT_OF_MEMORY:
-		strcpy(s, "GL_OUT_OF_MEMORY");
+		s = "GL_OUT_OF_MEMORY";
 		break;
 	default:
-		Com_sprintf(s, sizeof(s), "code (%i)", err);
+		s = "";
 		break;
 	}
 
-	Ren_Fatal("GL_CheckErrors: %s", s);
+	Ren_Fatal("GL_CheckErrors: %s code (%i)", s, err);
 }
 
 /*
@@ -1156,8 +1159,50 @@ void R_Register(void)
 	r_showCluster     = ri.Cvar_Get("r_showcluster", "0", CVAR_CHEAT);
 	r_speeds          = ri.Cvar_Get("r_speeds", "0", CVAR_CHEAT);
 
-	r_logFile      = ri.Cvar_Get("r_logFile", "0", CVAR_CHEAT);
-	r_debugSurface = ri.Cvar_Get("r_debugSurface", "0", CVAR_CHEAT);
+	r_logFile                 = ri.Cvar_Get("r_logFile", "0", CVAR_CHEAT);
+	r_debugSurface            = ri.Cvar_Get("r_debugSurface", "0", CVAR_CHEAT);
+	r_debugShaderSurfaceFlags = ri.Cvar_Get("r_debugShaderSurfaceFlags", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription(r_debugShaderSurfaceFlags,
+	                       "Highlights any shader with passed SURF_* bitflag set.\n"
+	                       "\n"
+	                       "e.g. for highlighting SURF_LANDMINE shaders:\n"
+	                       "    /r_debugShaderSurfaceFlags 2147483648\n"
+	                       "\n"
+	                       "SURF_* as decimals for reference follow:\n"
+	                       "\n"
+	                       "SURF_NODAMAGE           1\n"
+	                       "SURF_SLICK              2\n"
+	                       "SURF_SKY                4\n"
+	                       "SURF_LADDER             8\n"
+	                       "SURF_NOIMPACT           16\n"
+	                       "SURF_NOMARKS            32\n"
+	                       "SURF_SPLASH             64\n"
+	                       "SURF_NODRAW             128\n"
+	                       "SURF_HINT               256\n"
+	                       "SURF_SKIP               512\n"
+	                       "SURF_NOLIGHTMAP         1024\n"
+	                       "SURF_POINTLIGHT         2048\n"
+	                       "SURF_METAL              4096\n"
+	                       "SURF_NOSTEPS            8192\n"
+	                       "SURF_NONSOLID           16384\n"
+	                       "SURF_LIGHTFILTER        32768\n"
+	                       "SURF_ALPHASHADOW        65536\n"
+	                       "SURF_NODLIGHT           131072\n"
+	                       "SURF_WOOD               262144\n"
+	                       "SURF_GRASS              524288\n"
+	                       "SURF_GRAVEL             1048576\n"
+	                       "SURF_GLASS              2097152\n"
+	                       "SURF_SNOW               4194304\n"
+	                       "SURF_ROOF               8388608\n"
+	                       "SURF_RUBBLE             16777216\n"
+	                       "SURF_CARPET             33554432\n"
+	                       "SURF_MONSTERSLICK       67108864\n"
+	                       "SURF_MONSLICK_W         134217728\n"
+	                       "SURF_MONSLICK_N         268435456\n"
+	                       "SURF_MONSLICK_E         536870912\n"
+	                       "SURF_MONSLICK_S         1073741824\n"
+	                       "SURF_LANDMINE           2147483648\n"
+	                       );
 	r_noBind       = ri.Cvar_Get("r_nobind", "0", CVAR_CHEAT);
 	r_showTris     = ri.Cvar_Get("r_showtris", "0", CVAR_CHEAT);
 	r_trisColor    = ri.Cvar_Get("r_trisColor", "1.0 1.0 1.0 1.0", CVAR_ARCHIVE_ND);
@@ -1190,6 +1235,8 @@ void R_Register(void)
 
 	r_scale = ri.Cvar_Get("r_scale", "1", CVAR_ARCHIVE | CVAR_LATCH);
 
+	r_scalesvg = ri.Cvar_Get("r_scalesvg", "0", CVAR_ARCHIVE | CVAR_LATCH);
+	ri.Cvar_CheckRange(r_scalesvg, 0, 2, qtrue);
 
 	// make sure all the commands added here are also
 	// removed in R_Shutdown
@@ -1298,6 +1345,7 @@ void R_Init(void)
 
 void R_PurgeCache(void)
 {
+	R_PurgeDynamicShaders();
 	R_PurgeShaders(9999999);
 	R_PurgeBackupImages(9999999);
 	R_PurgeModels(9999999);

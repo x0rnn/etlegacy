@@ -1,4 +1,4 @@
-ET: Legacy ![Build status](https://github.com/etlegacy/etlegacy/workflows/ETLBuild/badge.svg) [![AppVeyor status](https://ci.appveyor.com/api/projects/status/468s0285u3w4vfom/branch/master?svg=true)](https://ci.appveyor.com/project/rmarquis/etlegacy/branch/master) [![Analysis status](https://scan.coverity.com/projects/1160/badge.svg)](https://scan.coverity.com/projects/1160) ![CodeQL status](https://github.com/etlegacy/etlegacy/workflows/CodeQL/badge.svg) [![chat](https://img.shields.io/discord/260750790203932672.svg?logo=discord)](https://discord.gg/UBAZFys)
+ET: Legacy ![Build status](https://github.com/etlegacy/etlegacy/workflows/ETLBuild/badge.svg) [![etlegacy](https://snapcraft.io/etlegacy/badge.svg)](https://snapcraft.io/etlegacy) [![Analysis status](https://scan.coverity.com/projects/1160/badge.svg)](https://scan.coverity.com/projects/1160) ![CodeQL status](https://github.com/etlegacy/etlegacy/workflows/CodeQL/badge.svg) [![chat](https://img.shields.io/discord/260750790203932672.svg?logo=discord)](https://discord.gg/UBAZFys)
 ==========
 
 *A second breath of life for Wolfenstein: Enemy Territory*
@@ -12,6 +12,7 @@ ET: Legacy ![Build status](https://github.com/etlegacy/etlegacy/workflows/ETLBui
 * Lua API: [https://etlegacy-lua-docs.readthedocs.io](https://etlegacy-lua-docs.readthedocs.io)
 * Translation: [https://www.transifex.com/etlegacy/etlegacy](https://www.transifex.com/etlegacy/etlegacy)
 * Contact: [#etlegacy](https://web.libera.chat/?channels=#etlegacy) on irc.libera.chat and [etlegacy/#etlegacy](https://discordapp.com/channels/260750790203932672/346956915814957067) on Discord.
+* SignPath: [etlegacy](https://signpath.org/projects/et_legacy/) on SignPath
 
 ## INTRODUCTION
 
@@ -31,6 +32,10 @@ See [CONTRIBUTING](CONTRIBUTING.md).
 ## SECURITY POLICY
 
 See [SECURITY](SECURITY.md).
+
+## CERTIFICATE SIGNING
+
+ET: Legacy Windows installers are now signed thx to [SignPath Foundation](https://signpath.org/)
 
 ## GENERAL NOTES
 
@@ -363,6 +368,11 @@ or 1 under the `RPI` section within the `easybuild.sh` script and run `./easybui
 
 If you want to switch between OpenGL and GLES when installing ET: Legacy, simply set the `FEATURE_RENDERER_GLES` flag to 0
 or 1 under the `RPI` section within the `easybuild.sh` script and run `./easybuild.sh -RPI -j4`.
+
+### Snap Store/Snapcraft
+
+To install ET Legacy using Snap Store/Snapcraft follow instructions in: 
+[etlegacy-snap repo](https://github.com/etlegacy/etlegacy-snap)
 
 ## LICENSE
 

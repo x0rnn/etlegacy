@@ -4891,7 +4891,7 @@ qboolean etpro_ScriptAction_SetValues(gentity_t *ent, char *params)
 			break;
 		}
 
-		strcpy(key, token);
+		Q_strncpyz(key, token, sizeof(key));
 
 		token = COM_ParseExt(&p, qfalse);
 		if (!token[0])
@@ -4899,7 +4899,7 @@ qboolean etpro_ScriptAction_SetValues(gentity_t *ent, char *params)
 			G_Error("etpro_ScriptAction_SetValues: key \"%s\" has no value\n", key);
 		}
 
-		strcpy(value, token);
+		Q_strncpyz(value, token, sizeof(value));
 
 		if (g_scriptDebug.integer)
 		{
@@ -4946,7 +4946,9 @@ qboolean etpro_ScriptAction_SetValues(gentity_t *ent, char *params)
 	{
 		if (!nospawn)
 		{
+			level.spawning = qtrue;
 			G_CallSpawn(ent);
+			level.spawning = qfalse;
 		}
 
 		trap_LinkEntity(ent);
@@ -5003,7 +5005,7 @@ qboolean G_ScriptAction_Delete(gentity_t *ent, char *params)
 			break;
 		}
 
-		strcpy(key, token);
+		Q_strncpyz(key, token, sizeof(key));
 
 		token = COM_ParseExt(&p, qfalse);
 		if (!token[0])
@@ -5011,14 +5013,16 @@ qboolean G_ScriptAction_Delete(gentity_t *ent, char *params)
 			G_Error("G_ScriptAction_Delete(): key \"%s\" has no value", key);
 		}
 
-		strcpy(value, token);
+		Q_strncpyz(value, token, sizeof(value));
 
 		// does the field exist?..
 		for (i = 0; fields[i].name; ++i)
+		{
 			if (!Q_stricmp(fields[i].name, key))
 			{
 				break;
 			}
+		}
 		if (!fields[i].name)
 		{
 			G_Error("G_ScriptAction_Delete(): non-existing key \"%s\"", key);
@@ -5059,7 +5063,7 @@ qboolean G_ScriptAction_Delete(gentity_t *ent, char *params)
 			break;
 
 		case F_VECTOR:
-            Q_sscanf(value, "%f %f %f", &valueVector[0], &valueVector[1], &valueVector[2]);
+			Q_sscanf(value, "%f %f %f", &valueVector[0], &valueVector[1], &valueVector[2]);
 			while ((found = G_FindVector(found, fields[i].ofs, valueVector)) != NULL)
 			{
 				pass[found->s.number]++;
@@ -5091,28 +5095,27 @@ qboolean G_ScriptAction_Delete(gentity_t *ent, char *params)
 	// did we find any key/value pairs in the params at all?..
 	if (count == 0)
 	{
-		return qfalse;
+		return qtrue;
 	}
 
 	// now delete the entities that passed all tests..
-	for (i = MAX_GENTITIES - 1; i >= MAX_CLIENTS; i--)
+	for (i = ENTITYNUM_MAX_NORMAL - 1; i >= MAX_CLIENTS + BODY_QUEUE_SIZE; i--)
+	{
 		if (pass[i] == count)
 		{
 			deleted++;
 			G_Printf("G_ScriptAction_Delete(): \"%s\" entity %i removed (%s)\n", g_entities[i].classname, i, params);
 			G_FreeEntity(&g_entities[i]);
 		}
+	}
 
 	// did we actually delete any entity?..
-	if (deleted > 0)
-	{
-		return qtrue;
-	}
-	else
+	if (deleted == 0)
 	{
 		G_Printf("G_ScriptAction_Delete(): no entities found (%s)\n", params);
 	}
-	return qfalse;
+
+	return qtrue;
 }
 
 /**
@@ -5123,10 +5126,9 @@ qboolean G_ScriptAction_Delete(gentity_t *ent, char *params)
  */
 qboolean G_ScriptAction_Create(gentity_t *ent, char *params)
 {
-	gentity_t *create;
-	char      *token;
-	char      *p = params;
-	char      key[MAX_TOKEN_CHARS], value[MAX_TOKEN_CHARS];
+	char *token;
+	char *p = params;
+	char key[MAX_TOKEN_CHARS], value[MAX_TOKEN_CHARS];
 
 	level.numSpawnVars     = 0;
 	level.numSpawnVarChars = 0;
@@ -5138,7 +5140,8 @@ qboolean G_ScriptAction_Create(gentity_t *ent, char *params)
 		{
 			break;
 		}
-		strcpy(key, token);
+
+		Q_strncpyz(key, token, sizeof(key));
 
 		token = COM_ParseExt(&p, qfalse);
 		if (!token[0])
@@ -5146,7 +5149,7 @@ qboolean G_ScriptAction_Create(gentity_t *ent, char *params)
 			G_Error("G_ScriptAction_Create(): key \"%s\" has no value", key);
 		}
 
-		strcpy(value, token);
+		Q_strncpyz(value, token, sizeof(value));
 
 		if (g_scriptDebug.integer)
 		{
@@ -5165,13 +5168,7 @@ qboolean G_ScriptAction_Create(gentity_t *ent, char *params)
 
 		level.numSpawnVars++;
 	}
-	create = G_SpawnGEntityFromSpawnVars();
 
-	if (!create)
-	{
-		return qfalse; // don't link NULL ents
-	}
-
-	trap_LinkEntity(create);
+	G_SpawnGEntityFromSpawnVars();
 	return qtrue;
 }

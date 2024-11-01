@@ -133,6 +133,12 @@ void SV_GameSendServerCommand(int clientNum, const char *text)
 		SV_DemoWriteGameCommand(clientNum, text);
 	}
 
+	if (clientNum == -2)
+	{
+		SV_CL_AddReliableCommand(text);
+		return;
+	}
+
 	if (clientNum == -1)
 	{
 		SV_SendServerCommand(NULL, "%s", text);
@@ -690,12 +696,16 @@ intptr_t SV_GameSystemCalls(intptr_t *args)
 	case G_MESSAGESTATUS:
 		return SV_BinaryMessageStatus(args[1]);
 
+	case TVG_GET_PLAYERSTATE:
+		return SV_CL_GetPlayerstate(args[1], VMA(2));
+
 	case G_DEMOSUPPORT:
 		SV_DemoSupport(VMA(1));
 		return 0;
 
 	case G_TRAP_GETVALUE:
 		return VM_Ext_GetValue(VMA(1), args[2], VMA(3));
+
 
 	default:
 		Com_Error(ERR_DROP, "Bad game system trap: %ld", (long int) args[0]);
@@ -722,6 +732,8 @@ void SV_ShutdownGameProgs(void)
 	VM_Call(gvm, GAME_SHUTDOWN, qfalse);
 	VM_Free(gvm);
 	gvm = NULL;
+
+	svcls.isTVGame = qfalse;
 }
 
 /**
@@ -740,6 +752,19 @@ static void SV_InitGameVM(qboolean restart)
 	for (i = 0 ; i < sv_maxclients->integer ; i++)
 	{
 		svs.clients[i].gentity = NULL;
+	}
+
+	if (svcls.isTVGame && !restart)
+	{
+		for (i = 0; i < MAX_CONFIGSTRINGS; i++)
+		{
+			if (!svcl.gameState.stringOffsets[i] || i == CS_SYSTEMINFO)
+			{
+				continue;
+			}
+
+			SV_SetConfigstring(i, svcl.gameState.stringData + svcl.gameState.stringOffsets[i]);
+		}
 	}
 
 	// mark all extensions as inactive
@@ -784,7 +809,16 @@ void SV_InitGameProgs(void)
 	sv.num_tags       = 0;
 
 	// load the dll
-	gvm = VM_Create("qagame", qfalse, SV_GameSystemCalls, VMI_NATIVE);
+	if (svcls.state >= CA_AUTHORIZING)
+	{
+		gvm            = VM_Create("tvgame", qfalse, SV_GameSystemCalls, VMI_NATIVE);
+		svcls.isTVGame = gvm != NULL;
+	}
+	else
+	{
+		gvm = VM_Create("qagame", qfalse, SV_GameSystemCalls, VMI_NATIVE);
+	}
+
 	if (!gvm)
 	{
 		VM_Error(ERR_FATAL, "game", Sys_GetDLLName("qagame"));
@@ -810,6 +844,10 @@ qboolean SV_GameCommand(void)
 
 	return VM_Call(gvm, GAME_CONSOLE_COMMAND);
 }
+
+#ifndef DEDICATED
+extern qboolean CL_GetTag(int clientNum, char *tagname, orientation_t *orientation);
+#endif
 
 /**
  * @brief SV_GetTag
@@ -838,5 +876,22 @@ qboolean SV_GetTag(int clientNum, int tagFileNumber, char *tagname, orientation_
 		}
 	}
 
+	// lets try and remove the inconsitancy between ded/non-ded servers...
+	// - bleh, some code in clientthink_real really relies on this working on player models...
+	// only only this code for the release builds so we can test out the hitbox code with the clients
+#if !defined(DEDICATED) && !defined(LEGACY_DEBUG)
+	if (com_dedicated->integer)
+	{
+		return qfalse;
+	}
+
+	if (clientNum < 0 || clientNum >= MAX_CLIENTS)
+	{
+		return qfalse;
+	}
+
+	return CL_GetTag(clientNum, tagname, orientation);
+#else
 	return qfalse;
+#endif
 }

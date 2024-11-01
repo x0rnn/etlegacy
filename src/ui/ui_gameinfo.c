@@ -267,8 +267,8 @@ void UI_LoadArenas(void)
 	for (i = 0; i < numdirs; i++, dirptr += dirlen + 1)
 	{
 		dirlen = strlen(dirptr);
-		Q_strcpy(filename, "scripts/");
-		Q_strcat(filename, 128, dirptr);
+		Q_strncpyz(filename, "scripts/", sizeof(filename));
+		Q_strcat(filename, sizeof(filename), dirptr);
 		UI_LoadArenasFromFile(filename);
 	}
 
@@ -281,6 +281,15 @@ void UI_LoadArenas(void)
 	if (uiInfo.mapCount >= 30) // 30 should be fail safe
 	{
 		trap_Print(va(S_COLOR_YELLOW "WARNING: Too many pk3 files in path - %i files found.\nWe strongly do recommend to reduce the number of map/pk3 files to max. 30 in path\nif you want to start a listen server with connected players.\n", uiInfo.mapCount));
+	}
+
+	// UI_LoadArenasFromFile will happily keep increasing this beyond the limits, cap it here instead of the function itself
+	// (or the parsing loop condition like in campaign loading), so we can still display the correct amount above.
+	// this is unlikely to happen with buffer size of 8192, but it could happen in theory with short map names
+	if (uiInfo.mapCount >= MAX_MAPS)
+	{
+		trap_Print(va(S_COLOR_YELLOW "WARNING: Reached MAX_MAPS (%i) for UI display, not all maps are displayed.\n", MAX_MAPS));
+		uiInfo.mapCount = MAX_MAPS - 1;
 	}
 
 	// sorting the maplist
@@ -646,8 +655,8 @@ void UI_LoadCampaigns(void)
 	for (i = 0; i < numdirs && uiInfo.campaignCount < MAX_CAMPAIGNS; i++, dirptr += dirlen + 1)
 	{
 		dirlen = strlen(dirptr);
-		Q_strcpy(filename, "scripts/");
-		Q_strcat(filename, 128, dirptr);
+		Q_strncpyz(filename, "scripts/", sizeof(filename));
+		Q_strcat(filename, sizeof(filename), dirptr);
 		UI_LoadCampaignsFromFile(filename);
 	}
 

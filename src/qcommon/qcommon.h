@@ -122,8 +122,8 @@ void MSG_ReadDeltaPlayerstate(msg_t *msg, struct playerState_s *from, struct pla
 
 void MSG_ReportChangeVectors_f(void);
 
-void MSG_ETTV_WriteDeltaSharedEntity(msg_t *msg, void *from, void *to, qboolean force);
-//void MSG_ETTV_ReadDeltaSharedEntity(msg_t *msg, void *from, void *to);
+void MSG_ETTV_WriteDeltaEntityShared(msg_t *msg, entityShared_t *from, entityShared_t *to, qboolean force);
+void MSG_ETTV_ReadDeltaEntityShared(msg_t *msg, entityShared_t *from, entityShared_t *to);
 
 /**
 ==============================================================
@@ -220,17 +220,17 @@ void NET_Shutdown(void);
 void NET_Restart_f(void);
 //void NET_Config(qboolean enableNetworking);
 
-void NET_SendPacket(netsrc_t sock, int length, const void *data, netadr_t to);
-void QDECL NET_OutOfBandPrint(netsrc_t sock, netadr_t adr, const char *format, ...);
-void QDECL NET_OutOfBandData(netsrc_t sock, netadr_t adr, const char *format, int len);
+void NET_SendPacket(netsrc_t sock, int length, const void *data, const netadr_t *to);
+void QDECL NET_OutOfBandPrint(netsrc_t sock, const netadr_t *adr, const char *format, ...);
+void QDECL NET_OutOfBandData(netsrc_t sock, const netadr_t *adr, const char *format, int len);
 
-qboolean NET_CompareAdr(netadr_t a, netadr_t b);
-qboolean NET_CompareBaseAdr(netadr_t a, netadr_t b);
-qboolean NET_IsLocalAddress(netadr_t adr);
+qboolean NET_CompareAdr(const netadr_t *a, const netadr_t *b);
+qboolean NET_CompareBaseAdr(const netadr_t *a, const netadr_t *b);
+qboolean NET_IsLocalAddress(const netadr_t *adr);
 qboolean NET_IsLocalAddressString(const char *address);
 qboolean NET_IsIPXAddress(const char *buf);
-const char *NET_AdrToString(netadr_t a);
-const char *NET_AdrToStringNoPort(netadr_t a);
+const char *NET_AdrToString(const netadr_t *a);
+const char *NET_AdrToStringNoPort(const netadr_t *a);
 int NET_StringToAdr(const char *s, netadr_t *a, netadrtype_t family);
 qboolean NET_GetLoopPacket(netsrc_t sock, netadr_t *net_from, msg_t *net_message);
 void NET_Sleep(int msec);
@@ -294,7 +294,7 @@ typedef struct
 } netchan_t;
 
 void Netchan_Init(int port);
-void Netchan_Setup(netsrc_t sock, netchan_t *chan, netadr_t adr, int qport);
+void Netchan_Setup(netsrc_t sock, netchan_t *chan, const netadr_t *adr, int qport);
 
 void Netchan_Transmit(netchan_t *chan, int length, const byte *data);
 void Netchan_TransmitNextFragment(netchan_t *chan);
@@ -435,7 +435,8 @@ enum svc_ops_e
 	svc_download,               ///< [short] size [size bytes]
 	svc_snapshot,
 	svc_EOF,
-	svc_ettv_playerstates
+	svc_ettv_playerstates,
+	svc_ettv_currentstate
 };
 
 /**
@@ -518,8 +519,24 @@ void VM_Clear(void);
 vm_t *VM_Restart(vm_t *vm);
 void VM_Error(errorParm_t errorParm, const char *module, const char *filename);
 
+#define GET_VM_MACRO(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, NAME, ...) NAME
+
+#define VM_Call_0(vm, callNum) VM_CallFunc(vm, callNum, VM_CALL_END)
+#define VM_Call_1(vm, callNum, a1) VM_CallFunc(vm, callNum, (intptr_t)(a1), VM_CALL_END)
+#define VM_Call_2(vm, callNum, a1, a2) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), VM_CALL_END)
+#define VM_Call_3(vm, callNum, a1, a2, a3) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), VM_CALL_END)
+#define VM_Call_4(vm, callNum, a1, a2, a3, a4) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), VM_CALL_END)
+#define VM_Call_5(vm, callNum, a1, a2, a3, a4, a5) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), VM_CALL_END)
+#define VM_Call_6(vm, callNum, a1, a2, a3, a4, a5, a6) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), VM_CALL_END)
+#define VM_Call_7(vm, callNum, a1, a2, a3, a4, a5, a6, a7) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), (intptr_t)(a7), VM_CALL_END)
+#define VM_Call_8(vm, callNum, a1, a2, a3, a4, a5, a6, a7, a8) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), (intptr_t)(a7), (intptr_t)(a8), VM_CALL_END)
+#define VM_Call_9(vm, callNum, a1, a2, a3, a4, a5, a6, a7, a8, a9) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), (intptr_t)(a7), (intptr_t)(a8), (intptr_t)(a9), VM_CALL_END)
+#define VM_Call_10(vm, callNum, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), (intptr_t)(a7), (intptr_t)(a8), (intptr_t)(a9), (intptr_t)(a10), VM_CALL_END)
+#define VM_Call_11(vm, callNum, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), (intptr_t)(a7), (intptr_t)(a8), (intptr_t)(a9), (intptr_t)(a10), (intptr_t)(a11), VM_CALL_END)
+#define VM_Call_12(vm, callNum, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12) VM_CallFunc(vm, callNum, (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3), (intptr_t)(a4), (intptr_t)(a5), (intptr_t)(a6), (intptr_t)(a7), (intptr_t)(a8), (intptr_t)(a9), (intptr_t)(a10), (intptr_t)(a11), (intptr_t)(a12), VM_CALL_END)
+
+#define VM_Call(...) EXPAND(GET_VM_MACRO(__VA_ARGS__, VM_Call_12, VM_Call_11, VM_Call_10, VM_Call_9, VM_Call_8, VM_Call_7, VM_Call_6, VM_Call_5, VM_Call_4, VM_Call_3, VM_Call_2, VM_Call_1, VM_Call_0)(__VA_ARGS__))
 intptr_t QDECL VM_CallFunc(vm_t *vm, int callNum, ...);
-#define VM_Call(...) VM_CallFunc(__VA_ARGS__, VM_CALL_END)
 
 void VM_Debug(int level);
 
@@ -631,6 +648,8 @@ void Cmd_TokenizeStringIncludeComments(const char *text);
 /// Parses a single line of text into arguments and tries to execute it
 /// as if it was typed at the console
 void Cmd_ExecuteString(const char *text);
+
+void Cmd_SingleTokenString(const char *text_in);
 
 /*
 ==============================================================
@@ -823,6 +842,8 @@ int FS_GetModList(char *listbuf, int bufsize);
 
 fileHandle_t FS_FOpenFileWrite(const char *fileName);
 // will properly create any needed paths and deal with seperater character issues
+
+fileHandle_t FS_PipeOpenWrite(const char *cmd, const char *filename);
 
 long FS_filelength(fileHandle_t f);
 fileHandle_t FS_SV_FOpenFileWrite(const char *fileName);
@@ -1033,6 +1054,7 @@ void Com_RandomBytes(void *bytes, int len);
 char *Com_MD5File(const char *fileName, int length, const char *prefix, int prefix_len);
 
 void Com_StartupVariable(const char *match);
+void Com_CommandLineCheck(qboolean (*clb)());
 void Com_SetRecommended(void);
 // checks for and removes command line "+set var arg" constructs
 // if match is NULL, all set commands will be executed, otherwise
@@ -1133,13 +1155,13 @@ temp file loading
 --- high memory ---
 */
 
-#ifdef ETLEGACY_DEBUG
+#if defined(ETLEGACY_DEBUG) && !defined(ZONE_DEBUG)
 #define ZONE_DEBUG
 #endif
 
 #ifdef ZONE_DEBUG
-#define Z_TagMalloc(size, tag)          Z_TagMallocDebug(size, tag, # size, __FILE__, __LINE__)
-#define Z_Malloc(size)                  Z_MallocDebug(size, # size, __FILE__, __LINE__)
+#define Z_TagMalloc(size, tag)          Z_TagMallocDebug(size, tag, # size, ETL_FILENAME, __LINE__)
+#define Z_Malloc(size)                  Z_MallocDebug(size, # size, ETL_FILENAME, __LINE__)
 void *Z_TagMallocDebug(size_t size, int tag, char *label, char *file, int line);   // NOT 0 filled memory
 void *Z_MallocDebug(size_t size, char *label, char *file, int line);               // returns 0 filled memory
 #else
@@ -1200,7 +1222,7 @@ void CL_MouseEvent(int dx, int dy, int time);
 
 void CL_JoystickEvent(int axis, int value, int time);
 
-void CL_PacketEvent(netadr_t from, msg_t *msg);
+void CL_PacketEvent(const netadr_t *from, msg_t *msg);
 
 void CL_ConsolePrint(char *txt);
 
@@ -1247,8 +1269,8 @@ void Com_CheckAutoUpdate(void);
 void Com_GetAutoUpdate(void);
 qboolean Com_CheckUpdateDownloads(void);
 qboolean Com_InitUpdateDownloads(void);
-qboolean Com_UpdatePacketEvent(netadr_t from);
-void Com_UpdateInfoPacket(netadr_t from);
+qboolean Com_UpdatePacketEvent(const netadr_t *from);
+void Com_UpdateInfoPacket(const netadr_t *from);
 void Com_CheckUpdateStarted(void);
 void Com_UpdateVarsClean(int flags);
 void Com_Update_f(void);
@@ -1289,10 +1311,11 @@ void SCR_DebugGraph(float value);     // FIXME: move logging to common?
 void SV_Init(void);
 void SV_Shutdown(const char *finalmsg);
 void SV_Frame(int msec);
-void SV_PacketEvent(netadr_t from, msg_t *msg);
+void SV_PacketEvent(const netadr_t *from, msg_t *msg);
 qboolean SV_GameCommand(void);
 int SV_FrameMsec();
 int SV_SendQueuedPackets();
+void SV_CheckTimeouts(void);
 
 // UI interface
 
@@ -1338,7 +1361,7 @@ typedef struct
 void Com_QueueEvent(int time, sysEventType_t type, int value, int value2, int ptrLength, void *ptr);
 int Com_EventLoop(void);
 sysEvent_t Com_GetSystemEvent(void);
-void Com_RunAndTimeServerPacket(netadr_t *evFrom, msg_t *buf);
+void Com_RunAndTimeServerPacket(const netadr_t *evFrom, msg_t *buf);
 
 void Sys_Init(void);
 qboolean IN_IsNumLockDown(void);
@@ -1360,6 +1383,7 @@ qboolean IN_IsNumLockDown(void);
 #endif
 
 qboolean Sys_DllExtension(const char *name);
+void Sys_Backtrace(int sig);
 
 char *Sys_GetCurrentUser(void);
 
@@ -1383,12 +1407,12 @@ void Sys_SnapVector(float *v);
 // the system console is shown when a dedicated server is running
 void Sys_DisplaySystemConsole(qboolean show);
 
-void Sys_SendPacket(int length, const void *data, netadr_t to);
+void Sys_SendPacket(int length, const void *data, const netadr_t *to);
 
 qboolean Sys_StringToAdr(const char *s, netadr_t *a, netadrtype_t family);
 //Does NOT parse port numbers, only base addresses.
 
-qboolean Sys_IsLANAddress(netadr_t adr);
+qboolean Sys_IsLANAddress(const netadr_t *adr);
 void Sys_ShowIP(void);
 
 qboolean Sys_CheckCD(void);

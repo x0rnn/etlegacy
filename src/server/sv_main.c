@@ -38,9 +38,13 @@
 #include "sv_tracker.h"
 #endif
 
-serverStatic_t svs;             // persistant server info
-server_t       sv;              // local server
-vm_t           *gvm = NULL;     // game virtual machine
+serverStatic_t       svs;             // persistant server info
+server_t             sv;              // local server
+svclientActive_t     svcl;
+svclientConnection_t svclc;
+svclientStatic_t     svcls;
+serverMessageQueue_t *svMsgQueueHead, *svMsgQueueTail;
+vm_t                 *gvm = NULL;     // game virtual machine
 
 cvar_t *sv_fps = NULL;          // time rate for running non-clients
 cvar_t *sv_timeout;             // seconds without any message
@@ -127,8 +131,14 @@ cvar_t *sv_serverTimeReset;
 
 cvar_t *sv_etltv_maxslaves;
 cvar_t *sv_etltv_password;
+cvar_t *sv_etltv_autorecord;
+cvar_t *sv_etltv_autoplay;
+cvar_t *sv_etltv_clientname;
+cvar_t *sv_etltv_delay;
+cvar_t *sv_etltv_shownet;
+cvar_t *sv_etltv_queue_ms;
 
-static void SVC_Status(netadr_t from, qboolean force);
+static void SVC_Status(const netadr_t *from, qboolean force);
 
 /*
 =============================================================================
@@ -363,7 +373,7 @@ void SV_MasterHeartbeat(const char *msg)
 
 				if (res)
 				{
-					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(adr[i][0]));
+					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(&adr[i][0]));
 				}
 				else
 				{
@@ -388,7 +398,7 @@ void SV_MasterHeartbeat(const char *msg)
 
 				if (res)
 				{
-					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(adr[i][1]));
+					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(&adr[i][1]));
 				}
 				else
 				{
@@ -415,13 +425,13 @@ void SV_MasterHeartbeat(const char *msg)
 
 		if ((netenabled & NET_ENABLEV4) && adr[i][0].type != NA_BAD)
 		{
-			NET_OutOfBandPrint(NS_SERVER, adr[i][0], "heartbeat %s\n", msg);
+			NET_OutOfBandPrint(NS_SERVER, &adr[i][0], "heartbeat %s\n", msg);
 		}
 
 #ifdef FEATURE_IPV6
 		if (netenabled & NET_ENABLEV6 && adr[i][1].type != NA_BAD)
 		{
-			NET_OutOfBandPrint(NS_SERVER, adr[i][1], "heartbeat %s\n", msg);
+			NET_OutOfBandPrint(NS_SERVER, &adr[i][1], "heartbeat %s\n", msg);
 		}
 #endif
 	}
@@ -481,7 +491,7 @@ void SV_MasterGameCompleteStatus()
 
 				if (res)
 				{
-					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(adr[i][0]));
+					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(&adr[i][0]));
 				}
 				else
 				{
@@ -506,7 +516,7 @@ void SV_MasterGameCompleteStatus()
 
 				if (res)
 				{
-					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(adr[i][1]));
+					Com_Printf("%s resolved to %s\n", master, NET_AdrToString(&adr[i][1]));
 				}
 				else
 				{
@@ -533,13 +543,13 @@ void SV_MasterGameCompleteStatus()
 
 		if ((netenabled & NET_ENABLEV4) && adr[i][0].type != NA_BAD)
 		{
-			SVC_Status(adr[i][0], qtrue);
+			SVC_Status(&adr[i][0], qtrue);
 		}
 
 #ifdef FEATURE_IPV6
 		if (netenabled & NET_ENABLEV6 && adr[i][1].type != NA_BAD)
 		{
-			SVC_Status(adr[i][1], qtrue);
+			SVC_Status(&adr[i][1], qtrue);
 		}
 #endif
 	}
@@ -576,18 +586,22 @@ leakyBucket_t        outboundLeakyBucket;
  * @param[in] address
  * @return
  */
-static long SVC_HashForAddress(netadr_t address)
+static long SVC_HashForAddress(const netadr_t *address)
 {
-	byte         *ip  = NULL;
+	const byte   *ip  = NULL;
 	size_t       size = 0;
 	unsigned int i;
 	long         hash = 0;
 
-	switch (address.type)
+	switch (address->type)
 	{
-	case NA_IP:  ip = address.ip;  size = 4;
+	case NA_IP:
+		ip   = address->ip;
+		size = sizeof(address->ip);
 		break;
-	case NA_IP6: ip = address.ip6; size = 16;
+	case NA_IP6:
+		ip   = address->ip6;
+		size = sizeof(address->ip6);
 		break;
 	default:
 		break;
@@ -617,7 +631,7 @@ static long SVC_HashForAddress(netadr_t address)
  * @param[in] period
  * @return
  */
-static leakyBucket_t *SVC_BucketForAddress(netadr_t address, int burst, int period)
+static leakyBucket_t *SVC_BucketForAddress(const netadr_t *address, int burst, int period)
 {
 	leakyBucket_t *bucket = NULL;
 	int           i;
@@ -629,13 +643,13 @@ static leakyBucket_t *SVC_BucketForAddress(netadr_t address, int burst, int peri
 		switch (bucket->type)
 		{
 		case NA_IP:
-			if (memcmp(bucket->ipv._4, address.ip, 4) == 0)
+			if (memcmp(bucket->ipv._4, address->ip, sizeof(address->ip)) == 0)
 			{
 				return bucket;
 			}
 			break;
 		case NA_IP6:
-			if (memcmp(bucket->ipv._6, address.ip6, 16) == 0)
+			if (memcmp(bucket->ipv._6, address->ip6, sizeof(address->ip6)) == 0)
 			{
 				return bucket;
 			}
@@ -677,12 +691,14 @@ static leakyBucket_t *SVC_BucketForAddress(netadr_t address, int burst, int peri
 
 		if (bucket->type == NA_BAD)
 		{
-			bucket->type = address.type;
-			switch (address.type)
+			bucket->type = address->type;
+			switch (address->type)
 			{
-			case NA_IP:  Com_Memcpy(bucket->ipv._4, address.ip, 4);
+			case NA_IP:
+				Com_Memcpy(bucket->ipv._4, address->ip, sizeof(address->ip));
 				break;
-			case NA_IP6: Com_Memcpy(bucket->ipv._6, address.ip6, 16);
+			case NA_IP6:
+				Com_Memcpy(bucket->ipv._6, address->ip6, sizeof(address->ip6));
 				break;
 			default:
 				break;
@@ -765,7 +781,7 @@ qboolean SVC_RateLimit(leakyBucket_t *bucket, int burst, int period)
  *
  * @note  Don't call if sv_protect 1 (SVP_IOQ3) flag is not set!
  */
-qboolean SVC_RateLimitAddress(netadr_t from, int burst, int period)
+qboolean SVC_RateLimitAddress(const netadr_t *from, int burst, int period)
 {
 	leakyBucket_t *bucket = SVC_BucketForAddress(from, burst, period);
 
@@ -781,7 +797,7 @@ qboolean SVC_RateLimitAddress(netadr_t from, int burst, int period)
  * @param[in] from
  * @param[in] force toggle rate limit checks
  */
-static void SVC_Status(netadr_t from, qboolean force)
+static void SVC_Status(const netadr_t *from, qboolean force)
 {
 	char          player[1024];
 	char          status[MAX_MSGLEN];
@@ -818,7 +834,7 @@ static void SVC_Status(netadr_t from, qboolean force)
 		return;
 	}
 
-	strcpy(infostring, Cvar_InfoString(CVAR_SERVERINFO | CVAR_SERVERINFO_NOUPDATE));
+	Q_strncpyz(infostring, Cvar_InfoString(CVAR_SERVERINFO | CVAR_SERVERINFO_NOUPDATE), sizeof(infostring));
 
 	// echo back the parameter to status. so master servers can use it as a challenge
 	// to prevent timed spoofed reply packets that add ghost servers
@@ -842,7 +858,7 @@ static void SVC_Status(netadr_t from, qboolean force)
 				break;      // can't hold any more
 			}
 
-			strcpy(status + statusLength, player);
+			Q_strcat(status, sizeof(status), player);
 			statusLength += playerLength;
 		}
 	}
@@ -856,7 +872,7 @@ static void SVC_Status(netadr_t from, qboolean force)
  *
  * @param[in] from
  */
-void SVC_Info(netadr_t from)
+static void SVC_Info(const netadr_t *from)
 {
 	int  i, clients = 0, humans = 0;
 	char *tmpString;
@@ -974,7 +990,7 @@ void SVC_Info(netadr_t from)
  */
 static void SV_FlushRedirect(char *outputbuf)
 {
-	NET_OutOfBandPrint(NS_SERVER, svs.redirectAddress, "print\n%s", outputbuf);
+	NET_OutOfBandPrint(NS_SERVER, &svs.redirectAddress, "print\n%s", outputbuf);
 }
 
 /**
@@ -988,7 +1004,7 @@ static void SV_FlushRedirect(char *outputbuf)
  *
  * @note Don't call this if sv_protect 2 flag is not set!
  */
-qboolean SV_CheckDRDoS(netadr_t from)
+static qboolean SV_CheckDRDoS(netadr_t from)
 {
 	int        i;
 	int        globalCount;
@@ -1005,7 +1021,7 @@ qboolean SV_CheckDRDoS(netadr_t from)
 	// with a source address being a spoofed LAN address.  Even if that's not
 	// the case, sending packets to other hosts in the LAN is not a big deal.
 	// NA_LOOPBACK qualifies as a LAN address.
-	if (Sys_IsLANAddress(from))
+	if (Sys_IsLANAddress(&from))
 	{
 		return qfalse;
 	}
@@ -1058,7 +1074,7 @@ qboolean SV_CheckDRDoS(netadr_t from)
 				// first frame of a server's life.
 				globalCount++;
 			}
-			if (NET_CompareBaseAdr(from, receipt->adr))
+			if (NET_CompareBaseAdr(&from, &receipt->adr))
 			{
 				specificCount++;
 			}
@@ -1085,7 +1101,7 @@ qboolean SV_CheckDRDoS(netadr_t from)
 		if (lastSpecificLogTime + 1000 <= timeNow)   // Limit one log every second.
 		{
 			SV_WriteAttackLog(va("Possible DRDoS attack to address %s, ignoring getinfo/getstatus connectionless packet\n",
-			                     NET_AdrToString(exactFrom)));
+			                     NET_AdrToString(&exactFrom)));
 			lastSpecificLogTime = timeNow;
 		}
 
@@ -1104,9 +1120,8 @@ qboolean SV_CheckDRDoS(netadr_t from)
  * Shift down the remaining args. Redirect all printfs.
  *
  * @param[in] from
- * @param msg - unused
  */
-static void SVC_RemoteCommand(netadr_t from, msg_t *msg)
+static void SVC_RemoteCommand(const netadr_t *from)
 {
 	qboolean valid;
 	char     remaining[1024];
@@ -1149,7 +1164,7 @@ static void SVC_RemoteCommand(netadr_t from, msg_t *msg)
 	}
 
 	// start redirecting all print outputs to the packet
-	svs.redirectAddress = from;
+	svs.redirectAddress = *from;
 	/* FIXME: our rcon redirection could be improved. Big rcon commands such as status
 	          lead to sending out of band packets on every single call to Com_Printf
 	          which leads to client overflows (also a Q3 issue)
@@ -1197,7 +1212,7 @@ static void SVC_RemoteCommand(netadr_t from, msg_t *msg)
  * @param[in] from
  * @param[in] msg
  */
-static void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
+static void SV_ConnectionlessPacket(const netadr_t *from, msg_t *msg)
 {
 	char *s;
 	char *c;
@@ -1228,7 +1243,7 @@ static void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
 			return;
 		}
 
-		if ((sv_protect->integer & SVP_OWOLF) && SV_CheckDRDoS(from))
+		if ((sv_protect->integer & SVP_OWOLF) && SV_CheckDRDoS(*from))
 		{
 			return;
 		}
@@ -1237,12 +1252,13 @@ static void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
 	}
 	else if (!Q_stricmp(c, "getinfo"))
 	{
-		if (sv_hidden->integer)
+		// if the server is hidden, don't respond to getinfo requests by default
+		if (sv_hidden->integer && !SV_CheckChallenge(from))
 		{
 			return;
 		}
 
-		if ((sv_protect->integer & SVP_OWOLF) && SV_CheckDRDoS(from))
+		if ((sv_protect->integer & SVP_OWOLF) && SV_CheckDRDoS(*from))
 		{
 			return;
 		}
@@ -1250,7 +1266,7 @@ static void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
 	}
 	else if (!Q_stricmp(c, "getchallenge"))
 	{
-		if ((sv_protect->integer & SVP_OWOLF) && SV_CheckDRDoS(from))
+		if ((sv_protect->integer & SVP_OWOLF) && SV_CheckDRDoS(*from))
 		{
 			return;
 		}
@@ -1263,7 +1279,7 @@ static void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
 	}
 	else if (!Q_stricmp(c, "rcon"))
 	{
-		SVC_RemoteCommand(from, msg);
+		SVC_RemoteCommand(from);
 	}
 	else if (!Q_stricmp(c, "disconnect"))
 	{
@@ -1288,11 +1304,24 @@ static void SV_ConnectionlessPacket(netadr_t from, msg_t *msg)
  * @param[in] from
  * @param[in] msg
  */
-void SV_PacketEvent(netadr_t from, msg_t *msg)
+void SV_PacketEvent(const netadr_t *from, msg_t *msg)
 {
 	int      i;
 	client_t *cl;
 	int      qport;
+
+#ifdef DEDICATED
+	if (NET_CompareAdr(from, &svclc.serverAddress))
+	{
+		CL_PacketEvent(from, msg);
+		return;
+	}
+
+	if (svcls.isTVGame && svcls.state == CA_DISCONNECTED)
+	{
+		return;
+	}
+#endif // DEDICATED
 
 	// check for connectionless packet (0xffffffff) first
 	if (msg->cursize >= 4 && *(int *)msg->data == -1)
@@ -1314,7 +1343,7 @@ void SV_PacketEvent(netadr_t from, msg_t *msg)
 		{
 			continue;
 		}
-		if (!NET_CompareBaseAdr(from, cl->netchan.remoteAddress))
+		if (!NET_CompareBaseAdr(from, &cl->netchan.remoteAddress))
 		{
 			continue;
 		}
@@ -1328,10 +1357,10 @@ void SV_PacketEvent(netadr_t from, msg_t *msg)
 		// the IP port can't be used to differentiate them, because
 		// some address translating routers periodically change UDP
 		// port assignments
-		if (cl->netchan.remoteAddress.port != from.port)
+		if (cl->netchan.remoteAddress.port != from->port)
 		{
 			Com_Printf("SV_PacketEvent: fixing up a translated port\n");
-			cl->netchan.remoteAddress.port = from.port;
+			cl->netchan.remoteAddress.port = from->port;
 		}
 
 		// make sure it is a valid, in sequence packet
@@ -1434,7 +1463,7 @@ static void SV_CalcPings(void)
  * for a few seconds to make sure any final reliable message gets resent
  * if necessary.
  */
-static void SV_CheckTimeouts(void)
+void SV_CheckTimeouts(void)
 {
 	client_t *cl;
 	int      i;
@@ -1565,6 +1594,11 @@ static qboolean SV_CheckPaused(void)
  */
 int SV_FrameMsec()
 {
+	if (svcls.isTVGame)
+	{
+		return 8;
+	}
+
 	if (sv_fps)
 	{
 		int frameMsec = (int)(1000.0f / sv_fps->value);
@@ -1584,6 +1618,93 @@ int SV_FrameMsec()
 	}
 }
 
+/**
+ * @brief SV_Frame_Ext
+ * @param[in] frameMsec
+ */
+static void SV_Frame_Ext(int frameMsec)
+{
+	int startTime;
+
+	if (cvar_modifiedFlags & CVAR_SERVERINFO)
+	{
+		SV_SetConfigstring(CS_SERVERINFO, Cvar_InfoString(CVAR_SERVERINFO | CVAR_SERVERINFO_NOUPDATE));
+		cvar_modifiedFlags &= ~CVAR_SERVERINFO;
+	}
+	if (cvar_modifiedFlags & CVAR_SERVERINFO_NOUPDATE)
+	{
+		SV_SetConfigstringNoUpdate(CS_SERVERINFO, Cvar_InfoString(CVAR_SERVERINFO | CVAR_SERVERINFO_NOUPDATE));
+		cvar_modifiedFlags &= ~CVAR_SERVERINFO_NOUPDATE;
+	}
+	if (cvar_modifiedFlags & CVAR_SYSTEMINFO)
+	{
+		SV_SetConfigstring(CS_SYSTEMINFO, Cvar_InfoString_Big(CVAR_SYSTEMINFO));
+		cvar_modifiedFlags &= ~CVAR_SYSTEMINFO;
+	}
+	if (cvar_modifiedFlags & CVAR_WOLFINFO)
+	{
+		SV_SetConfigstring(CS_WOLFINFO, Cvar_InfoString(CVAR_WOLFINFO));
+		cvar_modifiedFlags &= ~CVAR_WOLFINFO;
+	}
+
+	if (com_speeds->integer)
+	{
+		startTime = Sys_Milliseconds();
+	}
+	else
+	{
+		startTime = 0;  // quite a compiler warning
+	}
+
+	// start recording a demo
+	if (sv_autoDemo->integer)
+	{
+		SV_DemoAutoDemoRecord();
+	}
+
+	// update ping based on the all received frames
+	SV_CalcPings();
+
+	// run the game simulation in chunks
+	while (sv.timeResidual >= frameMsec)
+	{
+		sv.timeResidual -= frameMsec;
+		svs.time        += frameMsec;
+		sv.time         += frameMsec;
+
+		// let everything in the world think and move
+		VM_Call(gvm, GAME_RUN_FRAME, sv.time);
+
+		// play/record demo frame (if enabled)
+		if (sv.demoState == DS_RECORDING) // Record the frame
+		{
+			SV_DemoWriteFrame();
+		}
+		else if (sv_demoState->integer == DS_WAITINGPLAYBACK) // Launch again the playback of the demo (because we needed a restart in order to set some cvars such as sv_maxclients or fs_game)
+		{
+			SV_DemoRestartPlayback();
+		}
+		else if (sv.demoState == DS_PLAYBACK) // Play the next demo frame
+		{
+			SV_DemoReadFrame();
+		}
+	}
+
+	if (com_speeds->integer)
+	{
+		time_game = Sys_Milliseconds() - startTime;
+	}
+
+	// check timeouts
+	SV_CheckTimeouts();
+
+	// check user info buffer thingy
+	SV_CheckClientUserinfoTimer();
+
+	// send messages back to the clients
+	SV_SendClientMessages();
+}
+
 #ifdef DEDICATED
 extern void Sys_Sleep(int msec);
 #endif
@@ -1600,13 +1721,14 @@ extern void Sys_Sleep(int msec);
 void SV_Frame(int msec)
 {
 	int        frameMsec;
-	int        startTime;
 	char       mapname[MAX_QPATH];
 	int        frameStartTime = 0;
 	static int start, end;
 
 	start           = Sys_Milliseconds();
 	svs.stats.idle += ( double )(start - end) / 1000;
+
+	svcls.realtime += msec;
 
 	// the menu kills the server with this cvar
 	if (sv_killserver->integer)
@@ -1620,6 +1742,13 @@ void SV_Frame(int msec)
 	Com_WebDownloadLoop();
 	if (!com_sv_running->integer)
 	{
+		SV_CL_CheckForResend();
+
+		if (svcls.state == CA_CONNECTED && SV_CL_ReadyToSendPacket())
+		{
+			SV_CL_WritePacket();
+		}
+
 		return;
 	}
 #endif
@@ -1630,6 +1759,7 @@ void SV_Frame(int msec)
 		// Block until something interesting happens
 		Sys_Sleep(-1);
 #endif
+
 		return;
 	}
 
@@ -1649,7 +1779,7 @@ void SV_Frame(int msec)
 	{
 		Cvar_Set("sv_fps", "10");
 	}
-	frameMsec = 1000 / sv_fps->integer ;
+	frameMsec = 1000 / sv_fps->integer;
 
 	sv.timeResidual += msec;
 
@@ -1685,84 +1815,14 @@ void SV_Frame(int msec)
 		return;
 	}
 
-	// update infostrings if anything has been changed
-	if (cvar_modifiedFlags & CVAR_SERVERINFO)
+	if (svcls.isTVGame)
 	{
-		SV_SetConfigstring(CS_SERVERINFO, Cvar_InfoString(CVAR_SERVERINFO | CVAR_SERVERINFO_NOUPDATE));
-		cvar_modifiedFlags &= ~CVAR_SERVERINFO;
-	}
-	if (cvar_modifiedFlags & CVAR_SERVERINFO_NOUPDATE)
-	{
-		SV_SetConfigstringNoUpdate(CS_SERVERINFO, Cvar_InfoString(CVAR_SERVERINFO | CVAR_SERVERINFO_NOUPDATE));
-		cvar_modifiedFlags &= ~CVAR_SERVERINFO_NOUPDATE;
-	}
-	if (cvar_modifiedFlags & CVAR_SYSTEMINFO)
-	{
-		SV_SetConfigstring(CS_SYSTEMINFO, Cvar_InfoString_Big(CVAR_SYSTEMINFO));
-		cvar_modifiedFlags &= ~CVAR_SYSTEMINFO;
-	}
-	if (cvar_modifiedFlags & CVAR_WOLFINFO)
-	{
-		SV_SetConfigstring(CS_WOLFINFO, Cvar_InfoString(CVAR_WOLFINFO));
-		cvar_modifiedFlags &= ~CVAR_WOLFINFO;
-	}
-
-	// start recording a demo
-	if (sv_autoDemo->integer)
-	{
-		SV_DemoAutoDemoRecord();
-	}
-
-	if (com_speeds->integer)
-	{
-		startTime = Sys_Milliseconds();
+		SV_CL_Frame(frameMsec);
 	}
 	else
 	{
-		startTime = 0;  // quite a compiler warning
+		SV_Frame_Ext(frameMsec);
 	}
-
-	// update ping based on the all received frames
-	SV_CalcPings();
-
-	// run the game simulation in chunks
-	while (sv.timeResidual >= frameMsec)
-	{
-		sv.timeResidual -= frameMsec;
-		sv.time         += frameMsec;
-		svs.time        += frameMsec;
-
-		// let everything in the world think and move
-		VM_Call(gvm, GAME_RUN_FRAME, sv.time);
-
-		// play/record demo frame (if enabled)
-		if (sv.demoState == DS_RECORDING) // Record the frame
-		{
-			SV_DemoWriteFrame();
-		}
-		else if (sv_demoState->integer == DS_WAITINGPLAYBACK) // Launch again the playback of the demo (because we needed a restart in order to set some cvars such as sv_maxclients or fs_game)
-		{
-			SV_DemoRestartPlayback();
-		}
-		else if (sv.demoState == DS_PLAYBACK) // Play the next demo frame
-		{
-			SV_DemoReadFrame();
-		}
-	}
-
-	if (com_speeds->integer)
-	{
-		time_game = Sys_Milliseconds() - startTime;
-	}
-
-	// check timeouts
-	SV_CheckTimeouts();
-
-	// check user info buffer thingy
-	SV_CheckClientUserinfoTimer();
-
-	// send messages back to the clients
-	SV_SendClientMessages();
 
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat(HEARTBEAT_GAME);

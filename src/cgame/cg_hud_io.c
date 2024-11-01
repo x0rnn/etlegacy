@@ -46,6 +46,7 @@ typedef struct
 	qboolean calcAnchors;                               //< added in version 2
 	qboolean replaceNumberByName;                       //< added in version 3
 	char numberToNameTableReminder[MAXHUDS][MAX_QPATH]; //< added in version 3
+	qboolean shiftHealthBarDynamicColorStyle;           //< added in version 4
 } hudFileUpgrades_t;
 
 static uint32_t CG_CompareHudComponents(hudStucture_t *hud, hudComponent_t *comp, hudStucture_t *parentHud, hudComponent_t *parentComp);
@@ -406,26 +407,26 @@ static cJSON *CG_CreateHudObject(hudStucture_t *hud)
 	cJSON_AddStringToObject(hudObj, "name", hud->name);
 
 	// no value or null defaults to hud 0
-	if (hud->parent > 0)
+	if (hud->parentNumber > 0)
 	{
-		cJSON_AddStringToObject(hudObj, "parent", hud->parentname);
+		cJSON_AddStringToObject(hudObj, "parent", hud->parent);
 	}
 	// parent -1 means that this hud has no parent so write a implicit false flag
-	else if (hud->parent < 0)
+	else if (hud->parentNumber < 0)
 	{
 		cJSON_AddFalseToObject(hudObj, "parent");
 	}
 
 	compsObj = cJSON_AddObjectToObject(hudObj, "components");
 
-	if (hud->parent >= 0)
+	if (hud->parentNumber >= 0)
 	{
-		parent = CG_GetHudByNumber(hud->parent);
+		parent = CG_GetHudByNumber(hud->parentNumber);
 
 		// check that the parent hud still exists, otherwise mark the hud as "original" and write out all fields.
 		if (!parent)
 		{
-			hud->parent = -1;
+			hud->parentNumber = -1;
 		}
 	}
 
@@ -640,6 +641,72 @@ static uint32_t CG_CompareHudComponents(hudStucture_t *hud, hudComponent_t *comp
 }
 
 /**
+ * @brief CG_BackupHudFile
+ * @param[in] filename
+ * @param[in] upgrade - if true, the old file will be kept
+ * @return
+ */
+void CG_BackupHudFile(const char *filename, const qboolean upgrade)
+{
+	fileHandle_t tmp, backup;
+	byte         *buffer;
+	int          len;
+	qboolean     backupOk = qfalse;
+
+	len = trap_FS_FOpenFile(filename, &tmp, FS_READ);
+	if (len > 0)
+	{
+		char path[MAX_OSPATH];
+
+		CG_HudBackupFilePath(path, MAX_OSPATH);
+
+		buffer = Com_Allocate(len + 1);
+		if (!buffer)
+		{
+			trap_FS_FCloseFile(tmp);
+			CG_Error("CG_ReadHudsFromFile: Failed to allocate buffer\n");
+			return;
+		}
+
+		trap_FS_Read(buffer, len, tmp);
+		buffer[len] = 0;
+
+		if (trap_FS_FOpenFile(path, &backup, FS_WRITE) < 0)
+		{
+			CG_Printf(S_COLOR_RED "ERROR CG_ReadHudsFromFile: failed to save huds backup to '%s'\n", path);
+		}
+		else
+		{
+			trap_FS_Write(buffer, len, backup);
+			trap_FS_FCloseFile(backup);
+			backupOk = qtrue;
+
+			if (upgrade)
+			{
+				CG_Printf(S_COLOR_CYAN "Upgrading HUD version, backed up old custom hud data to '%s'\n", path);
+			}
+			else
+			{
+				CG_Printf(S_COLOR_CYAN "Backed up users custom hud data to '%s'\n", path);
+			}
+		}
+
+		Com_Dealloc(buffer);
+	}
+
+	if (len >= 0)
+	{
+		trap_FS_FCloseFile(tmp);
+	}
+
+	if (!upgrade && backupOk)
+	{
+		trap_FS_Delete(filename);
+		CG_Printf(S_COLOR_RED "Removed users custom hud file due to invalid format '%s'\n", filename);
+	}
+}
+
+/**
  * @brief CG_WriteHudsToFile
  * @return
  */
@@ -651,6 +718,20 @@ qboolean CG_WriteHudsToFile()
 	const char    *hudFilePath;
 
 	hudFilePath = CG_HudFilePath();
+
+	// read the old HUD file first, so we can check if we're upgrading the HUD version
+	root = Q_FSReadJsonFrom(hudFilePath);
+
+	if (root)
+	{
+		const int oldVersion = Q_ReadIntValueJson(root, "version");
+
+		// backup old file in case we're upgrading to new version, so downgrading is easy for the user
+		if (oldVersion < CURRENT_HUD_JSON_VERSION)
+		{
+			CG_BackupHudFile(hudFilePath, qtrue);
+		}
+	}
 
 	root = cJSON_CreateObject();
 	if (!root)
@@ -982,7 +1063,7 @@ static qboolean CG_ParseHUD(int handle)
 	{
 		loadDefaults = qfalse;
 
-		if (!PC_Int_Parse(handle, &tempHud->parent))
+		if (!PC_Int_Parse(handle, &tempHud->parentNumber))
 		{
 			return CG_HUD_ParseError(handle, "expected integer value for parent");
 		}
@@ -992,9 +1073,9 @@ static qboolean CG_ParseHUD(int handle)
 		trap_PC_UnReadToken(handle);
 	}
 
-	if (!parentHud && tempHud->parent >= 0)
+	if (!parentHud && tempHud->parentNumber >= 0)
 	{
-		parentHud = CG_GetHudByNumber(tempHud->parent);
+		parentHud = CG_GetHudByNumber(tempHud->parentNumber);
 	}
 
 	if (loadDefaults)
@@ -1277,6 +1358,12 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 			{
 				Q_strncpyz(upgr->numberToNameTableReminder[index], name, MAX_QPATH);
 			}
+
+			// try solve the name conflict from previous file version by using number version instead
+			if (CG_GetHudByName(tmpHud->name))
+			{
+				Q_strncpyz(tmpHud->name, va("%i", Q_ReadIntValueJson(hud, "number")), sizeof(tmpHud->name));
+			}
 		}
 	}
 	else
@@ -1291,37 +1378,48 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		}
 	}
 
+	// try to retrieved existing HUD from the given HUD name
+	oldHud = CG_GetHudByName(tmpHud->name);
+
+	// don't overwrite defaults HUD if we try to read a custom HUD
+	// using the same HUD name
+	if (oldHud && !oldHud->isEditable)
+	{
+		Com_Printf("skip %s to not overwrite default HUDs\n", tmpHud->name);
+		return oldHud;
+	}
+
 	tmp = cJSON_GetObjectItem(hud, "parent");
 	if (!tmp || cJSON_IsNull(tmp))
 	{
 		// default to hud 0 as parent
-		Q_strncpyz(tmpHud->parentname, DEFAULTHUD, sizeof(tmpHud->parentname));
-		tmpHud->parent = 0;
+		Q_strncpyz(tmpHud->parent, DEFAULTHUD, sizeof(tmpHud->parent));
+		tmpHud->parentNumber = 0;
 	}
 	else if (cJSON_IsFalse(tmp))
 	{
 		// No parent for this hud. Will not load defaults.
-		tmpHud->parentname[0] = '\0';
-		tmpHud->parent        = -1;
+		tmpHud->parent[0]    = '\0';
+		tmpHud->parentNumber = -1;
 	}
 	else
 	{
 		if (upgr->replaceNumberByName)
 		{
-			Q_strncpyz(tmpHud->parentname, va("%i", tmp->valueint), sizeof(tmpHud->parentname));
+			Q_strncpyz(tmpHud->parent, va("%i", tmp->valueint), sizeof(tmpHud->parent));
 		}
 		else
 		{
-			Q_strncpyz(tmpHud->parentname, tmp->valuestring, sizeof(tmpHud->parentname));
+			Q_strncpyz(tmpHud->parent, tmp->valuestring, sizeof(tmpHud->parent));
 		}
 
-		parentHud = CG_GetHudByName(tmpHud->parentname);
+		parentHud = CG_GetHudByName(tmpHud->parent);
 
 		if (upgr->replaceNumberByName)
 		{
 			if (!parentHud)
 			{
-				int index = Q_atoi(tmpHud->parentname);
+				int index = Q_atoi(tmpHud->parent);
 
 				if (index > 0 && index < MAXHUDS)
 				{
@@ -1332,7 +1430,7 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 
 		if (parentHud)
 		{
-			tmpHud->parent = parentHud->hudnumber;
+			tmpHud->parentNumber = parentHud->hudnumber;
 		}
 		else
 		{
@@ -1342,9 +1440,9 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		}
 	}
 
-	if (tmpHud->parent >= 0)
+	if (tmpHud->parentNumber >= 0)
 	{
-		parentHud = CG_GetHudByNumber(tmpHud->parent);
+		parentHud = CG_GetHudByNumber(tmpHud->parentNumber);
 	}
 
 	comps = cJSON_GetObjectItem(hud, "components");
@@ -1439,7 +1537,18 @@ static hudStucture_t *CG_ReadHudJsonObject(cJSON *hud, hudFileUpgrades_t *upgr, 
 		}
 	}
 
-	oldHud = CG_GetHudByName(tmpHud->name);
+	if (upgr->shiftHealthBarDynamicColorStyle)
+	{
+		// Ensure dynamic coloration style is applied due to insertion of needle style from bar
+		if (tmpHud->healthbar.style & BAR_NEEDLE)
+		{
+			tmpHud->healthbar.style |= (BAR_NEEDLE << 1);
+		}
+		else
+		{
+			tmpHud->healthbar.style |= BAR_NEEDLE;   // by default, needle will be active
+		}
+	}
 
 	if (upgr->calcAnchors)
 	{
@@ -1492,6 +1601,9 @@ static void CG_CheckJsonFileUpgrades(cJSON *root, hudFileUpgrades_t *ret)
 	// fall through
 	case 2:         // 2.81.1 - no more number, used unique string name
 		ret->replaceNumberByName = qtrue;
+	// fall through
+	case 3:         // 2.82.1 - needle style has been added for health bar, requiring shifting Dynamic Color style value
+		ret->shiftHealthBarDynamicColorStyle = qtrue;
 		break;
 	default:
 		CG_Printf(S_COLOR_RED "ERROR CG_ReadHudJsonFile: invalid version used: %i only %i is supported\n", fileVersion, CURRENT_HUD_JSON_VERSION);
@@ -1633,54 +1745,7 @@ void CG_ReadHudsFromFile(void)
 	{
 		// If the reading of the custom user hud file fails, then it's possible that the hud file is of "old" format
 		// back it up and then remove the file
-		fileHandle_t tmp, backup;
-		byte         *buffer;
-		int          len;
-		qboolean     backupOk = qfalse;
-
-		len = trap_FS_FOpenFile(hudFilePath, &tmp, FS_READ);
-		if (len > 0)
-		{
-			char path[MAX_OSPATH];
-
-			CG_HudBackupFilePath(path, MAX_OSPATH);
-
-			buffer = Com_Allocate(len + 1);
-			if (!buffer)
-			{
-				trap_FS_FCloseFile(tmp);
-				CG_Error("CG_ReadHudsFromFile: Failed to allocate buffer\n");
-				return;
-			}
-
-			trap_FS_Read(buffer, len, tmp);
-			buffer[len] = 0;
-
-			if (trap_FS_FOpenFile(path, &backup, FS_WRITE) < 0)
-			{
-				CG_Printf(S_COLOR_RED "ERROR CG_ReadHudsFromFile: failed to save huds backup to '%s'\n", path);
-			}
-			else
-			{
-				trap_FS_Write(buffer, len, backup);
-				trap_FS_FCloseFile(backup);
-				backupOk = qtrue;
-				CG_Printf(S_COLOR_CYAN "Backed up users custom hud data to '%s'\n", path);
-			}
-
-			Com_Dealloc(buffer);
-		}
-
-		if (len >= 0)
-		{
-			trap_FS_FCloseFile(tmp);
-		}
-
-		if (backupOk)
-		{
-			trap_FS_Delete(hudFilePath);
-			CG_Printf(S_COLOR_RED "Removed users custom hud file due to invalid format '%s'\n", hudFilePath);
-		}
+		CG_BackupHudFile(hudFilePath, qfalse);
 	}
 
 	Com_Printf("...hud count: %i\n", hudData.count);

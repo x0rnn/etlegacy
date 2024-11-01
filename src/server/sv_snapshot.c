@@ -90,7 +90,7 @@ static void SV_EmitPacketEntities(client_t *client, clientSnapshot_t *from, clie
 		else
 		{
 			newent       = &svs.snapshotEntities[(to->first_entity + newindex) % svs.numSnapshotEntities];
-			newSharedent = &svs.snapshotSharedEntities[(to->first_entity + newindex) % svs.numSnapshotEntities];
+			newSharedent = &svs.snapshotEntitiesShared[(to->first_entity + newindex) % svs.numSnapshotEntities];
 			newnum       = newent->number;
 		}
 
@@ -101,7 +101,7 @@ static void SV_EmitPacketEntities(client_t *client, clientSnapshot_t *from, clie
 		else
 		{
 			oldent       = &svs.snapshotEntities[(from->first_entity + oldindex) % svs.numSnapshotEntities];
-			oldSharedent = &svs.snapshotSharedEntities[(from->first_entity + oldindex) % svs.numSnapshotEntities];
+			oldSharedent = &svs.snapshotEntitiesShared[(from->first_entity + oldindex) % svs.numSnapshotEntities];
 			oldnum       = oldent->number;
 		}
 
@@ -115,7 +115,7 @@ static void SV_EmitPacketEntities(client_t *client, clientSnapshot_t *from, clie
 			MSG_WriteDeltaEntity(msg, oldent, newent, qfalse);
 			if (client->ettvClient && messageSize != msg->cursize)
 			{
-				MSG_ETTV_WriteDeltaSharedEntity(msg, oldSharedent, newSharedent, qtrue);
+				MSG_ETTV_WriteDeltaEntityShared(msg, oldSharedent, newSharedent, qtrue);
 			}
 
 			oldindex++;
@@ -134,7 +134,7 @@ static void SV_EmitPacketEntities(client_t *client, clientSnapshot_t *from, clie
 			MSG_WriteDeltaEntity(msg, &sv.svEntities[newnum].baseline, newent, qtrue);
 			if (client->ettvClient)
 			{
-				MSG_ETTV_WriteDeltaSharedEntity(msg, &sv.svEntities[newnum].baselineShared, newSharedent, qtrue);
+				MSG_ETTV_WriteDeltaEntityShared(msg, &sv.svEntities[newnum].baselineShared, newSharedent, qtrue);
 			}
 			newindex++;
 			continue;
@@ -146,7 +146,7 @@ static void SV_EmitPacketEntities(client_t *client, clientSnapshot_t *from, clie
 			MSG_WriteDeltaEntity(msg, oldent, NULL, qtrue);
 			if (client->ettvClient)
 			{
-				MSG_ETTV_WriteDeltaSharedEntity(msg, oldSharedent, NULL, qtrue);
+				MSG_ETTV_WriteDeltaEntityShared(msg, oldSharedent, NULL, qtrue);
 			}
 			oldindex++;
 			continue;
@@ -156,6 +156,7 @@ static void SV_EmitPacketEntities(client_t *client, clientSnapshot_t *from, clie
 	MSG_WriteBits(msg, (MAX_GENTITIES - 1), GENTITYNUM_BITS);       // end of packetentities
 }
 
+#ifdef DEDICATED
 /**
 * @brief Writes delta updates of playerstates to the message.
 * @param[in] client
@@ -180,28 +181,57 @@ static void SV_ETTV_EmitPlayerstates(client_t *client, msg_t *msg)
 
 	MSG_WriteByte(msg, svc_ettv_playerstates);
 
-	for (i = 0; i < sv_maxclients->integer; i++)
+	if (!svcls.isTVGame)
 	{
-		cl             = &svs.clients[i];
-		frame[i].valid = qfalse;
-
-		if (cl->state == CS_ACTIVE && client != cl)
+		for (i = 0; i < sv_maxclients->integer; i++)
 		{
-			// clientnum
-			MSG_WriteByte(msg, i);
+			cl             = &svs.clients[i];
+			frame[i].valid = qfalse;
 
-			frame[i].ps    = *SV_GameClientNum(i);
-			frame[i].valid = qtrue;
-
-			if (!oldframe || !oldframe[i].valid)
+			if (cl->state == CS_ACTIVE && client != cl)
 			{
-				MSG_WriteDeltaPlayerstate(msg, NULL, &frame[i].ps);
-				//Com_DPrintf(">>> [CL %d] Sent PS baseline\n", i);
+				// clientnum
+				MSG_WriteByte(msg, i);
+
+				frame[i].ps    = *SV_GameClientNum(i);
+				frame[i].valid = qtrue;
+
+				if (!oldframe || !oldframe[i].valid)
+				{
+					MSG_WriteDeltaPlayerstate(msg, NULL, &frame[i].ps);
+					//Com_DPrintf(">>> [CL %d] Sent PS baseline\n", i);
+				}
+				else
+				{
+					MSG_WriteDeltaPlayerstate(msg, &oldframe[i].ps, &frame[i].ps);
+					//Com_DPrintf(">>> [CL %d] Sent PS delta\n", i);
+				}
 			}
-			else
+		}
+	}
+	else
+	{
+		for (i = 0; i < MAX_CLIENTS; i++)
+		{
+			frame[i].valid = qfalse;
+
+			if (SV_CL_GetPlayerstate(i, &frame[i].ps))
 			{
-				MSG_WriteDeltaPlayerstate(msg, &oldframe[i].ps, &frame[i].ps);
-				//Com_DPrintf(">>> [CL %d] Sent PS delta\n", i);
+				// clientnum
+				MSG_WriteByte(msg, i);
+
+				frame[i].valid = qtrue;
+
+				if (!oldframe || !oldframe[i].valid)
+				{
+					MSG_WriteDeltaPlayerstate(msg, NULL, &frame[i].ps);
+					//Com_DPrintf(">>> [CL %d] Sent PS baseline\n", i);
+				}
+				else
+				{
+					MSG_WriteDeltaPlayerstate(msg, &oldframe[i].ps, &frame[i].ps);
+					//Com_DPrintf(">>> [CL %d] Sent PS delta\n", i);
+				}
 			}
 		}
 	}
@@ -209,6 +239,7 @@ static void SV_ETTV_EmitPlayerstates(client_t *client, msg_t *msg)
 	// end of svc_ettv_playerstates
 	MSG_WriteByte(msg, 255);
 }
+#endif // DEDICATED
 
 /**
  * @brief SV_WriteSnapshotToClient
@@ -223,6 +254,14 @@ static void SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
 
 	// this is the snapshot we are creating
 	frame = &client->frames[client->netchan.outgoingSequence & PACKET_MASK];
+
+	// if we are about to go over MAX_PARSE_ENTITIES send uncompressed snapshot
+	if (client->parseEntitiesNum > MAX_PARSE_ENTITIES - 128)
+	{
+		Com_DPrintf("%s: Too many parse entities.\n", client->name);
+		client->deltaMessage     = -1;
+		client->parseEntitiesNum = 0;
+	}
 
 	// try to use a previous frame as the source for delta compressing the snapshot
 	if (client->deltaMessage <= 0 || client->state != CS_ACTIVE)
@@ -302,10 +341,14 @@ static void SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
 	// delta encode the entities
 	SV_EmitPacketEntities(client, oldframe, frame, msg);
 
+#ifdef DEDICATED
 	if (client->ettvClient && client->state > CS_ZOMBIE)
 	{
 		SV_ETTV_EmitPlayerstates(client, msg);
 	}
+#endif // DEDICATED
+
+	client->parseEntitiesNum += frame->num_entities;
 
 	// padding for rate debugging
 	if (sv_padPackets->integer)
@@ -826,7 +869,7 @@ static void SV_BuildClientSnapshot(client_t *client)
 
 		if (client->ettvClient)
 		{
-			stateShared  = &svs.snapshotSharedEntities[svs.nextSnapshotEntities % svs.numSnapshotEntities];
+			stateShared  = &svs.snapshotEntitiesShared[svs.nextSnapshotEntities % svs.numSnapshotEntities];
 			*stateShared = ent->r;
 		}
 
@@ -930,12 +973,13 @@ int SV_RateMsec(client_t *client)
  * @param[in] msg
  * @param[in,out] client
  */
-void SV_SendMessageToClient(msg_t *msg, client_t *client)
+void SV_SendMessageToClient(msg_t *msg, client_t *client, qboolean parseEntities)
 {
 	// record information about the message
-	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSize  = msg->cursize;
-	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSent  = svs.time;
-	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageAcked = -1;
+	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSize   = msg->cursize;
+	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSent   = svs.time;
+	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageAcked  = -1;
+	client->frames[client->netchan.outgoingSequence & PACKET_MASK].parseEntities = parseEntities;
 
 	// send the datagram
 	SV_Netchan_Transmit(client, msg);
@@ -979,7 +1023,7 @@ void SV_SendClientIdle(client_t *client)
 		return;
 	}
 
-	SV_SendMessageToClient(&msg, client);
+	SV_SendMessageToClient(&msg, client, qfalse);
 
 	sv.bpsTotalBytes  += msg.cursize;           // net debugging
 	sv.ubpsTotalBytes += msg.uncompsize / 8;    // net debugging
@@ -1042,7 +1086,7 @@ void SV_SendClientSnapshot(client_t *client)
 		return;
 	}
 
-	SV_SendMessageToClient(&msg, client);
+	SV_SendMessageToClient(&msg, client, qtrue);
 
 	sv.bpsTotalBytes  += msg.cursize;           // net debugging
 	sv.ubpsTotalBytes += msg.uncompsize / 8;    // net debugging
@@ -1110,7 +1154,7 @@ void SV_SendClientMessages(void)
 		}
 
 		if (!(c->netchan.remoteAddress.type == NA_LOOPBACK ||
-		      (sv_lanForceRate->integer && Sys_IsLANAddress(c->netchan.remoteAddress))))
+		      (sv_lanForceRate->integer && Sys_IsLANAddress(&c->netchan.remoteAddress))))
 		{
 			// rate control for clients not on LAN
 			if (SV_RateMsec(c) > 0)

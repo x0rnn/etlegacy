@@ -38,15 +38,6 @@
 #include "../qcommon/q_shared.h"
 #include "tr_public.h"
 #include "iqm.h"
-#ifdef FEATURE_RENDERER_GLES
-#include <GLES/gl.h>
-#else
-#   ifdef BUNDLED_GLEW
-#      include "GL/glew.h"
-#   else
-#      include <GL/glew.h>
-#   endif
-#endif
 
 extern refimport_t ri;
 
@@ -70,7 +61,7 @@ extern int gl_NormalFontBase;
 
 #ifdef ETLEGACY_DEBUG
 #define RENLOG r_logFile->integer
-#define Ren_LogComment(...) if (RENLOG) { ri.Printf(PRINT_DEVELOPER, __VA_ARGS__); }
+#define Ren_LogComment(...) if (RENLOG) ri.Printf(PRINT_DEVELOPER, __VA_ARGS__)
 #define Ren_Developer(...) ri.Printf(PRINT_DEVELOPER, __VA_ARGS__)
 #else
 #define RENLOG 0
@@ -203,6 +194,7 @@ extern cvar_t *r_overBrightBits;
 extern cvar_t *r_mapOverBrightBits;
 
 extern cvar_t *r_debugSurface;
+extern cvar_t *r_debugShaderSurfaceFlags;
 extern cvar_t *r_simpleMipMaps;
 
 extern cvar_t *r_ambientScale;
@@ -219,6 +211,8 @@ extern cvar_t *r_maxPolys;
 extern cvar_t *r_maxPolyVerts;
 
 extern cvar_t *r_ext_multisample;
+
+extern cvar_t *r_scalesvg;
 
 /**
  * @enum renderSpeeds_t for r_speeds

@@ -847,8 +847,8 @@ qboolean ParseShaderR1(char *_text)
 		// Doom 3 DECAL_MACRO
 		else if (!Q_stricmp(token, "DECAL_MACRO"))
 		{
-			shader.polygonOffset      = qtrue;
-			shader.sort               = SS_DECAL;
+			shader.polygonOffset = qtrue;
+			shader.sort          = SS_DECAL;
 			SurfaceParm("discrete");
 			SurfaceParm("noShadows");
 			continue;
@@ -857,8 +857,8 @@ qboolean ParseShaderR1(char *_text)
 		else if (!Q_stricmp(token, "DECAL_ALPHATEST_MACRO"))
 		{
 			// what's different?
-			shader.polygonOffset      = qtrue;
-			shader.sort               = SS_DECAL;
+			shader.polygonOffset = qtrue;
+			shader.sort          = SS_DECAL;
 			SurfaceParm("discrete");
 			SurfaceParm("noShadows");
 			continue;
@@ -1036,7 +1036,8 @@ int ScanAndLoadShaderFilesR1()
 	}
 
 	// build single large buffer
-	s_shaderTextR1    = (char *)ri.Hunk_Alloc(sum + numShaderFiles * 2, h_low);
+	size              = sum + numShaderFiles * 2;
+	s_shaderTextR1    = (char *)ri.Hunk_Alloc(size, h_low);
 	s_shaderTextR1[0] = '\0';
 	textEnd           = s_shaderTextR1;
 
@@ -1048,8 +1049,8 @@ int ScanAndLoadShaderFilesR1()
 			continue;
 		}
 
-		strcat(textEnd, buffers[i]);
-		strcat(textEnd, "\n");
+		Q_strcat(textEnd, size - strlen(textEnd), buffers[i]);
+		Q_strcat(textEnd, size - strlen(textEnd), "\n");
 		textEnd += strlen(textEnd);
 		ri.FS_FreeFile(buffers[i]);
 	}

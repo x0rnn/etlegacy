@@ -388,11 +388,11 @@ typedef struct centity_s
 	qboolean interpolate;           ///< true if next is valid to interpolate to
 	qboolean currentValid;          ///< true if cg.frame holds this entity
 
-	int muzzleFlashTime;            ///< move to playerEntity?
+	int firedTime;            ///< move to playerEntity?
 	int overheatTime;
 	int previousEvent;
 	int previousEventSequence;
-	int teleportFlag;
+	int miscInt;
 
 	int trailTime;                  ///< so missile trails can handle dropped initial packets
 	int miscTime;
@@ -687,6 +687,7 @@ typedef struct clientInfo_s
 	float totalWeapAcc;
 	float totalWeapHSpct;
 	int kills;
+	int killsAssists;
 	int deaths;
 	int gibs;
 	int selfKills;
@@ -787,6 +788,8 @@ typedef struct soundSurfaceTable_s
 	const char *surfaceName;
 
 } soundSurfaceTable_t;
+
+extern const soundSurfaceTable_t soundSurfaceTable[W_MAX_SND_SURF];
 
 /**
  * @struct partModel_s
@@ -948,6 +951,9 @@ typedef struct weaponInfo_s
 	qhandle_t standModel;               ///< not drawn.  tags used for positioning weapons for pickup
 	qboolean droppedAnglesHack;
 
+	vec3_t dynFov90;
+	vec3_t dynFov120;
+
 	weaponModel_t weaponModel[W_NUM_TYPES];
 	partModel_t partModels[W_NUM_TYPES][W_MAX_PARTS];
 	qhandle_t flashModel[W_NUM_TYPES];
@@ -974,13 +980,14 @@ typedef struct weaponInfo_s
 	sfxHandle_t missileSound;
 	weaponSounds_t missileFallSound;
 	weaponSounds_t missileBouncingSound[W_MAX_SND_SURF];
-	void (*missileTrailFunc)(centity_t *, const struct weaponInfo_s *wi);
+	void (*missileTrailFunc)(centity_t *);
 	float missileDlight;
 	vec3_t missileDlightColor;
 	int missileRenderfx;
 
 	void (*ejectBrassFunc)(centity_t *);
-	vec3_t ejectBrassOffset;
+	vec3_t firstPersonEjectBrassOffset;
+	vec3_t thirdPersonEjectBrassOffset;
 
 	vec3_t fireRecoil;                  ///< kick angle
 	vec3_t adjustLean;
@@ -1113,13 +1120,24 @@ typedef enum
 	SHOW_ON
 } showView_t;
 
+/**
+ * @struct version_t
+ * @brief
+ */
+typedef struct version_s
+{
+	int major;
+	int minor;
+	int patch;
+} version_t;
+
 void CG_ParseMapEntityInfo(int axis_number, int allied_number);
 
 #define MAX_WEAP_BANKS_MP          10
 #define MAX_WEAPS_IN_BANK_MP       18
 #define MAX_WEAP_BANK_SWITCH_ORDER 4
 
-#define MAX_BACKUP_STATES (CMD_BACKUP + 2)
+#define MAX_BACKUP_STATES (CMD_BACKUP_ETL + 2)
 
 /**
  * @struct cg_t
@@ -1135,9 +1153,11 @@ typedef struct
 
 	qboolean demoPlayback;
 	demoPlayInfo_t *demoinfo;
+	version_t demoVersion;
 	int etLegacyClient;                     ///< is either 0 (vanilla client) or a version integer from git_version.h
 	qboolean loading;                       ///< don't defer players at initial startup
 	qboolean intermissionStarted;           ///< don't draw disconnect icon/message because game will end shortly
+	qboolean autoCmdExecuted;				///< has 'cg_autoCmd' been executed yet
 
 	// there are only one or two snapshot_t that are relevent at a time
 	int latestSnapshotNum;                  ///< the number of snapshots the client system has received
@@ -1257,19 +1277,13 @@ typedef struct
 	// kill timers for carnage reward
 	int lastKillTime;
 
-	// crosshair client-, mine-, dyna-ID
-	int crosshairClientNum;
-	int crosshairClientTime;
-	int crosshairMine;
-	int crosshairMineTime;
-	int crosshairDyna;
-	int crosshairDynaTime;
-
+	// crosshair
+	centity_t *crosshairEntsToScan[MAX_ENTITIES_IN_SNAPSHOT];
+	int crosshairEntsToScanCount;
+	int crosshairEntNum;
+	int crosshairEntTime;
 	qboolean crosshairNotLookingAtClient;
-	int crosshairSPClientTime;
-	int crosshairVerticalShift;
 	qboolean crosshairClientNoShoot;
-	qboolean crosshairTerrain;
 
 	int teamFirstBlood;                         ///< 0: allies 1: axis -1: nobody
 	int teamWonRounds[2];
@@ -1563,6 +1577,15 @@ typedef struct
 	char bannerPrint[1024];
 
 	int lastKeyCatcher;
+
+	int cmdBackup;                                    ///< CMD_BACKUP
+	int cmdMask;                                      ///< CMD_MASK
+
+	qboolean updateOldestValidCmd;                    ///< whenever snapshot transition happens save oldest valid command
+	int oldestValidCmd;                               ///< that will be used as a next starting point for prediction
+	                                                  ///< instead of iterating through whole CMD_BACKUP array every frame
+
+	qboolean mapConfigLoaded; // qtrue if map-specific autoexec was loaded
 } cg_t;
 
 #define MAX_LOCKER_DEBRIS 5
@@ -1792,6 +1815,7 @@ typedef struct
 	qhandle_t axisUniformShader;
 
 	// sounds
+	sfxHandle_t noAmmoSound;
 	sfxHandle_t noFireUnderwater;
 	sfxHandle_t selectSound;
 	sfxHandle_t landHurt;
@@ -2093,7 +2117,7 @@ typedef struct cg_weaponstats_s
 typedef struct
 {
 	char strWS[WS_MAX][MAX_STRING_TOKENS];
-	char strExtra[6][MAX_STRING_TOKENS];
+	char strExtra[7][MAX_STRING_TOKENS];
 	char strRank[MAX_STRING_TOKENS];
 	char strSkillz[SK_NUM_SKILLS][MAX_STRING_TOKENS];
 	int cWeapons;
@@ -2163,6 +2187,7 @@ enum
 {
 	POPUP_XPGAIN_SCROLL_DOWN = BIT(0),
 	POPUP_XPGAIN_NO_REASON   = BIT(1),
+	POPUP_XPGAIN_NO_STACK    = BIT(2),
 };
 
 // Compass
@@ -2176,6 +2201,12 @@ enum
 	COMPASS_DIRECTION            = BIT(5),
 	COMPASS_CARDINAL_POINTS      = BIT(6),
 	COMPASS_ALWAYS_DRAW          = BIT(7),
+};
+
+// Follow filters
+enum
+{
+	FOLLOW_NO_COUNTDOWN = BIT(0),
 };
 
 /// Locations
@@ -2219,6 +2250,7 @@ enum
 	BAR_BORDER_SMALL   = BIT(9),
 	BAR_DECOR          = BIT(10),
 	BAR_ICON           = BIT(11),
+	BAR_NEEDLE         = BIT(12),
 };
 
 enum
@@ -2266,12 +2298,12 @@ typedef struct
 } clientLocation_t;
 
 #if defined(FEATURE_RATING) && defined(FEATURE_PRESTIGE)
-#define NUM_ENDGAME_AWARDS     22   ///< total number of endgame awards
+#define NUM_ENDGAME_AWARDS     23   ///< total number of endgame awards
 #else
 #if defined(FEATURE_RATING) || defined(FEATURE_PRESTIGE)
-#define NUM_ENDGAME_AWARDS     21   ///< total number of endgame awards
+#define NUM_ENDGAME_AWARDS     22   ///< total number of endgame awards
 #else
-#define NUM_ENDGAME_AWARDS     20   ///< total number of endgame awards
+#define NUM_ENDGAME_AWARDS     21   ///< total number of endgame awards
 #endif
 #endif
 #define NUMSHOW_ENDGAME_AWARDS 14   ///< number of awards to display that will fit on screen
@@ -2412,7 +2444,7 @@ typedef struct sortedVotedMapByTotal_s
  */
 typedef struct cgs_s
 {
-	gameState_t gameState;                          ///< gamestate from server
+	gameState_t currentGameState;                   ///< gameState from server
 	glconfig_t glconfig;                            ///< rendering configuration
 	float screenXScale;                             ///< derived from glconfig
 	float screenYScale;
@@ -2568,6 +2600,7 @@ typedef struct cgs_s
 	int ccSelectedClass;
 	weapon_t ccSelectedPrimaryWeapon;                   ///< Selected primary weapon from limbo panel
 	weapon_t ccSelectedSecondaryWeapon;                 ///< Selected secondary weapon from limbo panel
+	qboolean ccManuallySetSecondaryWeapon;
 	int ccWeaponShots;
 	int ccWeaponHits;
 	vec3_t ccPortalPos;
@@ -2685,6 +2718,8 @@ typedef struct cgs_s
 	int sv_fps;                 // FPS server wants to send
 	sampledStat_t sampledStat;  // fps client sample data
 
+	int scoresCount;
+	char scores[MAX_SCORES_CMDS][MAX_STRING_CHARS];
 } cgs_t;
 
 //==============================================================================
@@ -2707,6 +2742,7 @@ extern vmCvar_t cg_drawCrosshair;
 extern vmCvar_t cg_drawCrosshairFade;
 extern vmCvar_t cg_drawCrosshairPickups;
 extern vmCvar_t cg_drawSpectatorNames;
+extern vmCvar_t cg_drawHintFade;
 extern vmCvar_t cg_useWeapsForZoom;
 extern vmCvar_t cg_weaponCycleDelay;
 extern vmCvar_t cg_cycleAllWeaps;
@@ -2724,11 +2760,14 @@ extern vmCvar_t cg_markTime;
 extern vmCvar_t cg_bloodPuff;
 extern vmCvar_t cg_brassTime;
 extern vmCvar_t cg_gun_frame;
+extern vmCvar_t cg_gunFovOffset;
 extern vmCvar_t cg_gun_x;
 extern vmCvar_t cg_gun_y;
 extern vmCvar_t cg_gun_z;
 extern vmCvar_t cg_drawGun;
 extern vmCvar_t cg_weapAnims;
+extern vmCvar_t cg_weapBankCollisions;
+extern vmCvar_t cg_weapSwitchNoAmmoSounds;
 extern vmCvar_t cg_letterbox;
 extern vmCvar_t cg_tracerChance;
 extern vmCvar_t cg_tracerWidth;
@@ -2737,6 +2776,8 @@ extern vmCvar_t cg_tracerSpeed;
 extern vmCvar_t cg_autoswitch;
 extern vmCvar_t cg_fov;
 extern vmCvar_t cg_muzzleFlash;
+extern vmCvar_t cg_muzzleFlashDlight;
+extern vmCvar_t cg_muzzleFlashScale;
 extern vmCvar_t cg_drawEnvAwareness;
 extern vmCvar_t cg_drawEnvAwarenessScale;
 extern vmCvar_t cg_drawEnvAwarenessIconSize;
@@ -2776,6 +2817,7 @@ extern vmCvar_t pmove_msec;
 
 extern vmCvar_t cg_timescale;
 
+extern vmCvar_t cg_spritesFollowHeads;
 extern vmCvar_t cg_voiceSpriteTime;
 
 extern vmCvar_t cg_gameType;
@@ -2879,10 +2921,12 @@ extern vmCvar_t cg_simpleItemsScale;
 
 extern vmCvar_t cg_weapaltReloads;
 extern vmCvar_t cg_weapaltSwitches;
+extern vmCvar_t cg_weapaltMgAutoProne;
 
 extern vmCvar_t cg_sharetimerText;
 
 extern vmCvar_t cg_automapZoom;
+extern vmCvar_t cg_autoCmd;
 
 extern vmCvar_t cg_popupFadeTime;
 extern vmCvar_t cg_popupStayTime;
@@ -2910,7 +2954,7 @@ extern vmCvar_t cg_quickchat;
 
 extern vmCvar_t cg_drawUnit;
 
-extern vmCvar_t cg_visualEffects;  ///< turn invisible (0) / visible (1) visual effect (i.e airstrike plane, debris ...)
+extern vmCvar_t cg_visualEffects;  ///< turn invisible (0) / visible (1) visual effect (e.g. smoke, debris, ...)
 extern vmCvar_t cg_bannerTime;
 
 extern vmCvar_t cg_shoutcastTeamNameRed;
@@ -2921,6 +2965,7 @@ extern vmCvar_t cg_shoutcastGrenadeTrail;
 extern vmCvar_t cg_activateLean;
 
 extern vmCvar_t cg_drawBreathPuffs;
+extern vmCvar_t cg_drawAirstrikePlanes;
 
 extern vmCvar_t cg_customFont1;
 extern vmCvar_t cg_customFont2;
@@ -3004,13 +3049,15 @@ void CG_QueueMusic(void);
 
 void CG_UpdateCvars(void);
 
-qboolean CG_execFile(const char *filename);
+qboolean CG_ConfigFileExists(const char *filename);
+void CG_execFile(const char *filename);
 int CG_CrosshairPlayer(void);
 int CG_LastAttacker(void);
 void CG_KeyEvent(int key, qboolean down);
 void CG_MouseEvent(int x, int y);
 void CG_EventHandling(int type, qboolean fForced);
 int CG_RoundTime(qtime_t *qtime);
+qboolean CG_IsVersionCompatible(version_t *current, version_t *minimum);
 
 void CG_HudEditor_Cleanup();
 
@@ -3044,6 +3091,8 @@ void CG_Letterbox(float xsize, float ysize, qboolean center);
 
 void CG_DrawLine(const vec3_t start, const vec3_t end, float width, const vec4_t color, qhandle_t shader);
 
+void CG_SetupDlightstyles(void);
+
 // cg_drawtools.c
 
 qboolean Ccg_Is43Screen(void);      // does this game-window have a 4:3 aspectratio. note: this is also true for a 800x600 windowed game on a widescreen monitor
@@ -3061,7 +3110,7 @@ void CG_DrawPic(float x, float y, float width, float height, qhandle_t hShader);
 void CG_DrawPicST(float x, float y, float width, float height, float s0, float t0, float s1, float t1, qhandle_t hShader);
 void CG_DrawRotatedPic(float x, float y, float width, float height, qhandle_t hShader, float angle);        // NERVE - SMF
 void CG_FilledBar(float x, float y, float w, float h, float *startColor, float *endColor,
-                  const float *bgColor, const float *bdColor, float frac, int flags, qhandle_t icon);
+                  const float *bgColor, const float *bdColor, float frac, float needleFrac, int flags, qhandle_t icon);
 void CG_DropdownMainBox(float x, float y, float w, float h, float scalex, float scaley, vec4_t borderColour,
                         const char *text, qboolean focus, vec4_t fontColour, int style, fontHelper_t *font);
 float CG_DropdownBox(float x, float y, float w, float h, float scalex, float scaley, vec4_t borderColour,
@@ -3099,6 +3148,7 @@ const char *CG_TranslateString(const char *string);
 
 void CG_InitStatsDebug(void);
 void CG_StatsDebugAddText(const char *text);
+void CG_DrawDebugArtillery(centity_t * cent);
 
 void CG_AddLagometerFrameInfo(void);
 void CG_AddLagometerSnapshotInfo(snapshot_t *snap);
@@ -3106,7 +3156,6 @@ void CG_CenterPrint(const char *str);
 void CG_PriorityCenterPrint(const char *str, int priority);
 void CG_ObjectivePrint(const char *str);
 void CG_DrawActive(void);
-void CG_CheckForCursorHints(void);
 void CG_DrawTeamBackground(int x, int y, int w, int h, float alpha, int team);
 void CG_Text_Paint_Ext(float x, float y, float scalex, float scaley, vec4_t color, const char *text, float adjust, int limit, int style, fontHelper_t *font);
 void CG_Text_Paint_Centred_Ext(float x, float y, float scalex, float scaley, vec4_t color, const char *text, float adjust, int limit, int style, fontHelper_t *font);
@@ -3132,6 +3181,7 @@ void CG_AddLineToScene(const vec3_t start, const vec3_t end, const vec4_t colour
 
 void CG_DrawRotateGizmo(const vec3_t origin, float radius, int numSegments, int activeAxis);
 void CG_DrawMoveGizmo(const vec3_t origin, float radius, int activeAxis);
+void CG_DrawSprite(const vec3_t origin, float radius, qhandle_t shader, byte color[4]);
 
 /**
  * @struct scrollText_s
@@ -3164,7 +3214,7 @@ void CG_DrawActiveHud(void);
 void CG_Text_PaintChar_Ext(float x, float y, float w, float h, float scalex, float scaley, float s, float t, float s2, float t2, qhandle_t hShader);
 void CG_Text_PaintChar(float x, float y, float width, float height, float scale, float s, float t, float s2, float t2, qhandle_t hShader);
 
-void CG_DrawWeapHeat(rectDef_t *rect, int align);
+void CG_DrawWeapHeat(rectDef_t *rect, int align, qboolean dynamicColor);
 void CG_DrawPlayerWeaponIcon(rectDef_t *rect, int align, vec4_t *refcolor);
 int CG_CalculateReinfTime(team_t team);
 int CG_GetReinfTime(qboolean menu);
@@ -3219,7 +3269,18 @@ qboolean CG_AddLinkedEntity(centity_t *cent, qboolean ignoreframe, int atTime);
 void CG_PositionEntityOnTag(refEntity_t *entity, const refEntity_t *parent, const char *tagName, int startIndex, vec3_t *offset);
 void CG_PositionRotatedEntityOnTag(refEntity_t *entity, const refEntity_t *parent, const char *tagName);
 
+// cg_weapons_io.c
+void CG_RegisterWeapon(int weaponNum, qboolean force);
+void CG_RegisterItemVisuals(int itemNum);
+
 // cg_weapons.c
+void CG_MachineGunEjectBrass(centity_t *cent);
+void CG_PanzerFaustEjectBrass(centity_t *cent);
+void CG_PyroSmokeTrail(centity_t *ent);
+void CG_RocketTrail(centity_t *ent);
+void CG_DynamiteTrail(centity_t *ent);
+void CG_GrenadeTrail(centity_t *ent);
+
 void CG_LastWeaponUsed_f(void);
 void CG_NextWeaponInBank_f(void);
 void CG_PrevWeaponInBank_f(void);
@@ -3228,13 +3289,10 @@ void CG_NextWeapon_f(void);
 void CG_PrevWeapon_f(void);
 void CG_Weapon_f(void);
 void CG_WeaponBank_f(void);
-qboolean CG_WeaponSelectable(int weapon);
+qboolean CG_WeaponSelectable(int weapon, qboolean playSound);
 
 void CG_FinishWeaponChange(int lastweap, int newweap);
 void CG_SetSniperZoom(int weapon);
-
-void CG_RegisterWeapon(int weaponNum, qboolean force);
-void CG_RegisterItemVisuals(int itemNum);
 
 void CG_FireWeapon(centity_t *cent);
 
@@ -3248,10 +3306,12 @@ void CG_MortarEFX(centity_t *cent);
 
 void CG_MissileHitPlayer(int entityNum, int weapon, vec3_t origin, vec3_t dir, int fleshEntityNum);
 qboolean CG_CalcMuzzlePoint(int entityNum, vec3_t muzzle);
-void CG_Bullet(int weapon, vec3_t end, int sourceEntityNum, qboolean isHeadShot, int fleshEntityNum);
+void CG_Bullet(int weapon, vec3_t end, int sourceEntityNum, int targetEntityNum);
 
 void CG_RailTrail(vec3_t color, vec3_t start, vec3_t end, int type, int index);
-void CG_RailTrail2(vec3_t color, vec3_t start, vec3_t end, int index, int sideNum);
+void CG_RailTrail2(const vec3_t color, const vec3_t start, const vec3_t end, int index, int sideNum);
+
+int CG_CalcLoopFrames(animation_t *anim);
 
 void CG_AddViewWeapon(playerState_t *ps);
 void CG_AddPlayerWeapon(refEntity_t *parent, playerState_t *ps, centity_t *cent);
@@ -3338,7 +3398,7 @@ void CG_UpdateFlamethrowerSounds(void);
 void CG_InitLocalEntities(void);
 localEntity_t *CG_AllocLocalEntity(void);
 localEntity_t *CG_FindLocalEntity(int index, int sideNum);
-void CG_AddLocalEntities(void);
+void CG_AddLocalEntities(qboolean master);
 void CG_DemoRewindFixLocalEntities(void);
 
 // cg_locations.c
@@ -3755,9 +3815,13 @@ void trap_R_Finish(void);
 qboolean trap_GetValue(char *value, int valueSize, const char *key);
 void trap_SysFlashWindow(int state);
 void trap_CommandComplete(const char *value);
+void trap_CmdBackup_Ext(void);
+void trap_MatchPaused(qboolean matchPaused);
 extern int dll_com_trapGetValue;
 extern int dll_trap_SysFlashWindow;
 extern int dll_trap_CommandComplete;
+extern int dll_trap_CmdBackup_Ext;
+extern int dll_trap_MatchPaused;
 
 bg_playerclass_t *CG_PlayerClassForClientinfo(clientInfo_t *ci, centity_t *cent);
 
@@ -4212,7 +4276,7 @@ typedef struct
 	anchorPoint_t point;
 } anchor_t;
 
-#define HUD_COMPONENTS_NUM 57
+#define HUD_COMPONENTS_NUM 59
 
 typedef struct hudComponent_s
 {
@@ -4245,8 +4309,8 @@ typedef struct hudStructure_s
 	byte computed;
 	char name[MAX_QPATH];
 	int hudnumber;
-	int parent;
-	char parentname[MAX_QPATH];
+	int parentNumber;
+	char parent[MAX_QPATH];
 	qboolean isEditable;
 
 	hudComponent_t compass;
@@ -4269,7 +4333,9 @@ typedef struct hudStructure_s
 	hudComponent_t hudhead;
 
 	hudComponent_t cursorhints;
-	hudComponent_t weaponstability;  // 20
+	hudComponent_t cursorhintsbar; // 20
+	hudComponent_t cursorhintstext;
+	hudComponent_t weaponstability;
 	hudComponent_t livesleft;
 
 	hudComponent_t roundtimer;
@@ -4279,9 +4345,9 @@ typedef struct hudStructure_s
 
 	hudComponent_t votetext;
 	hudComponent_t spectatortext;
-	hudComponent_t limbotext;
+	hudComponent_t limbotext;   // 30
 	hudComponent_t followtext;
-	hudComponent_t demotext;        // 30
+	hudComponent_t demotext;
 
 	hudComponent_t missilecamera;
 
@@ -4291,9 +4357,9 @@ typedef struct hudStructure_s
 	hudComponent_t fps;
 	hudComponent_t snapshot;
 	hudComponent_t ping;
-	hudComponent_t speed;
+	hudComponent_t speed;   // 40
 	hudComponent_t lagometer;
-	hudComponent_t disconnect;      // 40
+	hudComponent_t disconnect;
 	hudComponent_t chat;
 	hudComponent_t spectatorstatus;
 	hudComponent_t pmitemsbig;
@@ -4301,9 +4367,9 @@ typedef struct hudStructure_s
 	hudComponent_t warmuptext;
 	hudComponent_t objectivetext;
 	hudComponent_t centerprint;
-	hudComponent_t banner;
+	hudComponent_t banner;  // 50
 	hudComponent_t crosshair;
-	hudComponent_t crosshairtext;   // 50
+	hudComponent_t crosshairtext;
 	hudComponent_t crosshairbar;
 	hudComponent_t stats;
 	hudComponent_t xpgain;
@@ -4317,7 +4383,7 @@ typedef struct hudStructure_s
 
 #define MAXHUDS 32
 #define MAXSTYLES 24
-#define CURRENT_HUD_JSON_VERSION 3
+#define CURRENT_HUD_JSON_VERSION 4
 #define DEFAULTHUD "ETmain"
 
 typedef struct
@@ -4330,6 +4396,7 @@ typedef struct
 } hudData_t;
 
 extern hudData_t hudData;
+extern hudComponent_t *showOnlyHudComponent;
 
 typedef struct
 {
@@ -4367,6 +4434,7 @@ void CG_CloneHud(hudStucture_t *target, hudStucture_t *source);
 void CG_FreeHud(hudStucture_t *hud);
 hudStucture_t *CG_GetHudByNumber(int number);
 hudStucture_t *CG_GetHudByName(const char *name);
+void CG_UpdateParentHUD(const char *oldParent, const char *newParent, int newParentNum);
 void CG_setDefaultHudValues(hudStucture_t *hud);
 void CG_HudComponentsFill(hudStucture_t *hud);
 void CG_CalculateComponentInternals(hudStucture_t *hud, hudComponent_t *comp);
@@ -4394,6 +4462,8 @@ void CG_DrawCenterString(hudComponent_t *comp);
 void CG_DrawBannerPrint(hudComponent_t *comp);
 void CG_DrawWeapStability(hudComponent_t *comp);
 void CG_DrawCursorhint(hudComponent_t *comp);
+void CG_DrawCursorHintBar(hudComponent_t *comp);
+void CG_DrawCursorHintText(hudComponent_t *comp);
 void CG_DrawCrosshair(hudComponent_t *comp);
 
 void CG_DrawPlayerStatusHead(hudComponent_t *comp);
@@ -4452,6 +4522,7 @@ qboolean CG_HudSave(int HUDToDuplicate, int HUDToDelete);
 void CG_HudEditorSetup(void);
 void CG_DrawHudEditor(void);
 void CG_HudEditor_KeyHandling(int key, qboolean down);
+void CG_HudEditorReset();
 void CG_HudEditorMouseMove_Handling(int x, int y);
 
 typedef struct
@@ -4465,5 +4536,7 @@ void CG_DrawHelpWindow(float x, float y, int *status, const char *title, const h
                        panel_button_text_t *fontHeader, panel_button_text_t *fontText);
 
 float CG_ComputeScale(hudComponent_t *comp /*, float height, float scale, fontHelper_t *font*/);
+
+void CG_DrawCursor(float x, float y);
 
 #endif // #ifndef INCLUDE_CG_LOCAL_H

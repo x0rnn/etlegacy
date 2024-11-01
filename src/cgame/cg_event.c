@@ -117,32 +117,60 @@ void CG_GetObituaryIcon(meansOfDeath_t mod, weapon_t weapon, qhandle_t *weaponSh
 	}
 }
 
-static ID_INLINE void CG_ColorObituaryEntName(clientInfo_t *ci, char *name, char force)
+/**
+ * @brief CG_ColorCharFromFloat Just squashes the float value into a char into the range of '0' to '9'
+ * @param[in] val float color channel value between 0.0 and 1.0
+ * @return char color value between '0' and '9'
+ */
+static ID_INLINE char CG_ColorCharFromFloat(float val)
+{
+	return MIN(MAX('0' + (int)(val * 255.0f), '0'), '9');
+}
+
+/**
+ * @brief CG_ColorObituaryEntName
+ * @param[in] ci
+ * @param[in] color As spectator : 1st index is axis color, 2nd index is team kill color, 3rd is allies colors.
+ *                  As player    : 1st index is enemy color, 2nd index is team kill color, 3rd is team mate color.
+ * @param[in,out] name player name to be colored
+ * @param[in] same_team is team kill
+ */
+static ID_INLINE void CG_ColorObituaryEntName(clientInfo_t *ci, vec4_t color, char *name, qboolean same_team)
 {
 	clientInfo_t *self = &cgs.clientinfo[cg.clientNum];
 	Q_CleanStr(name);
 	memmove(name + 2, name, strlen(name) + 1);
 	name[0] = '^';
 
+	if (same_team)
+	{
+		name[1] = CG_ColorCharFromFloat(color[1]);
+		return;
+	}
+
 	if (self->team != TEAM_SPECTATOR)
 	{
 		if (ci->team != self->team)
 		{
-			name[1] = '1';
+			name[1] = CG_ColorCharFromFloat(color[0]);
 		}
 		else
 		{
-			name[1] = '2';
+			name[1] = CG_ColorCharFromFloat(color[2]);
 		}
 	}
 	else
 	{
-		name[1] = '3';
-	}
-
-	if (force)
-	{
-		name[1] = force;
+		// we are spectating so just use the default colors
+		// Axis are red, Allies are green by default
+		if (ci->team == TEAM_AXIS)
+		{
+			name[1] = CG_ColorCharFromFloat(color[0]);
+		}
+		else
+		{
+			name[1] = CG_ColorCharFromFloat(color[2]);
+		}
 	}
 }
 
@@ -170,6 +198,9 @@ static void CG_Obituary(entityState_t *ent)
 	{
 		CG_Error("CG_Obituary: target out of range\n");
 	}
+
+	// this happens alongside 'EV_STOPSTREAMINGSOUND', as it sometimes doesn't seem to get emitted
+	trap_S_StartSoundEx(NULL, target, CHAN_WEAPON, 0, SND_CUTOFF_ALL);  // kill weapon sound (could be reloading)
 
 	// no obituary message if changing teams
 	if (mod == MOD_SWITCHTEAM)
@@ -257,7 +288,7 @@ static void CG_Obituary(entityState_t *ent)
 		Q_strncpyz(targetName, ci->name, sizeof(targetName) - 2);
 		if (pmComp->style & POPUP_FORCE_COLORS)
 		{
-			CG_ColorObituaryEntName(ci, targetName, ca && ca->team == ci->team ? '4': 0);
+			CG_ColorObituaryEntName(ci, pmComp->colorMain, targetName, ca && ca != ci && ca->team == ci->team);
 		}
 		Q_strcat(targetName, MAX_NAME_LENGTH, S_COLOR_WHITE);
 
@@ -314,7 +345,7 @@ static void CG_Obituary(entityState_t *ent)
 				Q_strncpyz(attackerName, ca->name, sizeof(attackerName) - 2);
 				if (pmComp->style & POPUP_FORCE_COLORS)
 				{
-					CG_ColorObituaryEntName(ca, attackerName, ca && ca->team == ci->team ? '4': 0);
+					CG_ColorObituaryEntName(ca, pmComp->colorMain, attackerName, ca && ca->team == ci->team);
 				}
 				Q_strcat(attackerName, MAX_NAME_LENGTH, S_COLOR_WHITE);
 
@@ -336,7 +367,7 @@ static void CG_Obituary(entityState_t *ent)
 				}
 				else
 				{
-					if (ci->team == ca->team)
+					if (ci->team == ca->team && !(pmComp->style & POPUP_FORCE_COLORS))
 					{
 						CG_AddPMItemEx(PM_DEATH, va("%s^1 %s^7 ", targetName, CG_TranslateString(message)), va("%s^1%s", attackerName, CG_TranslateString(message2)), shader, 0, 0, colorRed, i);
 					}
@@ -518,8 +549,8 @@ void CG_PainEvent(centity_t *cent, int health, qboolean crouching)
 typedef struct fxSound_s
 {
 	int max;
-	qhandle_t sound[3];
-	const char *soundfile[3];
+	qhandle_t sound[MAX_PRECACHED_FXSOUNDS];
+	const char *soundfile[MAX_PRECACHED_FXSOUNDS];
 } fxSound_t;
 
 static fxSound_t fxSounds[FXTYPE_MAX] =
@@ -549,7 +580,7 @@ void CG_PrecacheFXSounds(void)
 
 	for (i = FXTYPE_WOOD; i < FXTYPE_MAX; i++)
 	{
-		for (j = 0; j < fxSounds[i].max; j++)
+		for (j = 0; j < MAX_PRECACHED_FXSOUNDS && fxSounds[i].soundfile[j]; j++)
 		{
 			fxSounds[i].sound[j] = trap_S_RegisterSound(fxSounds[i].soundfile[j], qfalse);
 		}
@@ -1987,7 +2018,7 @@ void CG_EntityEvent(centity_t *cent, vec3_t position)
 
 	if (cg_debugEvents.integer)
 	{
-		CG_Printf("time:%i ent:%3i  event:%3i ", cg.time, es->number, event);
+		CG_Printf("CEV: RECV time:%7i ent:%15i event:%3i eventParm:%3i ", cg.time, es->number, event, es->eventParm);
 
 		if (event < EV_NONE || event >= EV_MAX_EVENTS)
 		{
@@ -1995,7 +2026,7 @@ void CG_EntityEvent(centity_t *cent, vec3_t position)
 		}
 		else
 		{
-			CG_Printf("%s\n", eventnames[event]);
+			Com_Printf("%s C(%d)\n", eventnames[event], (es->clientNum < 0 || es->clientNum >= MAX_CLIENTS) ? -1 : es->clientNum);
 		}
 	}
 
@@ -2240,11 +2271,11 @@ void CG_EntityEvent(centity_t *cent, vec3_t position)
 		// IS_VALID_WEAPON(es->weapon) ?
 		if (BG_IsSkillAvailable(cgs.clientinfo[clientNum].skill, SK_LIGHT_WEAPONS, SK_LIGHT_WEAPONS_FASTER_RELOAD) && (GetWeaponTableData(es->weapon)->attributes & WEAPON_ATTRIBUT_FAST_RELOAD) && cg_weapons[es->weapon].reloadFastSound)
 		{
-			trap_S_StartSound(NULL, es->number, CHAN_WEAPON, cg_weapons[es->weapon].reloadFastSound);
+			trap_S_StartSoundEx(NULL, es->number, CHAN_WEAPON, cg_weapons[es->weapon].reloadFastSound, SND_PAUSABLE);
 		}
 		else if (cg_weapons[es->weapon].reloadSound)
 		{
-			trap_S_StartSound(NULL, es->number, CHAN_WEAPON, cg_weapons[es->weapon].reloadSound);     // following sherman's SP fix, should allow killing reload sound when player dies
+			trap_S_StartSoundEx(NULL, es->number, CHAN_WEAPON, cg_weapons[es->weapon].reloadSound, SND_PAUSABLE);     // following sherman's SP fix, should allow killing reload sound when player dies
 		}
 		break;
 	case EV_MG42_FIXED:
@@ -2259,7 +2290,7 @@ void CG_EntityEvent(centity_t *cent, vec3_t position)
 
 		if (es->number == cg.snap->ps.clientNum)
 		{
-			if ((cg_noAmmoAutoSwitch.integer > 0 && !CG_WeaponSelectable(cg.weaponSelect))
+			if ((cg_noAmmoAutoSwitch.integer > 0 && !CG_WeaponSelectable(cg.weaponSelect, qfalse))
 			    || (GetWeaponTableData(es->weapon)->firingMode & (WEAPON_FIRING_MODE_ONE_SHOT | WEAPON_FIRING_MODE_THROWABLE)))
 			{
 				CG_OutOfAmmoChange(event == EV_NOAMMO);
@@ -2431,7 +2462,7 @@ void CG_EntityEvent(centity_t *cent, vec3_t position)
 		break;
 	case EV_BULLET:
 		CG_PlayHitSound(es->otherEntityNum, es->modelindex);
-		CG_Bullet(es->weapon, es->pos.trBase, es->otherEntityNum, es->modelindex, es->eventParm);
+		CG_Bullet(es->weapon, es->pos.trBase, es->otherEntityNum, es->otherEntityNum2);
 		break;
 	case EV_GENERAL_SOUND:
 	{

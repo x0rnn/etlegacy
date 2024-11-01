@@ -1115,6 +1115,10 @@ static qboolean hit_parse_hit(hit_t *hitModel, mdx_t *mdx, char **ptr)
 			{
 				hit->impactpoint = IMPACTPOINT_KNEE_LEFT;
 			}
+			else if (!Q_stricmp(token, "legs"))
+			{
+				hit->impactpoint = IMPACTPOINT_LEGS;
+			}
 			else
 			{
 				hit->impactpoint = Q_atoi(token);
@@ -1330,11 +1334,11 @@ void mdx_LoadHitsFile(char *animationGroup, animModelInfo_t *animModelInfo)
 	Q_strncpyz(hitsfile, animationGroup, sizeof(hitsfile) - 4);
 	if ((sep = strrchr(hitsfile, '.'))) // FIXME: should abort on /'s
 	{
-		strcpy(sep, ".hit");
+		Q_strncpyz(sep, ".hit", sizeof(hitsfile) - (sep - sizeof(hitsfile));
 	}
 	else
 	{
-		strcat(sep, ".hit");
+		Q_strcat(hitsfile, ".hit", sizeof(hitsfile));
 	}
 	mdx_RegisterHits(animModelInfo, hitsfile);
 #endif
@@ -1568,9 +1572,9 @@ void mdx_calculate_bones_single(/*const*/ grefEntity_t *refent, int i)
  */
 static void mdx_bone_orientation(/*const*/ grefEntity_t *refent, int idx, vec3_t origin, vec3_t axis[3])
 {
-	mdx_t             *frameModel = &mdx_models[QHANDLETOINDEX(refent->frameModel)];
-	mdx_t             *oldFrameModel = &mdx_models[QHANDLETOINDEX_SAFE(refent->oldframeModel, refent->frameModel)];
-	mdx_t             *torsoFrameModel = &mdx_models[QHANDLETOINDEX(refent->torsoFrameModel)];
+	mdx_t             *frameModel         = &mdx_models[QHANDLETOINDEX(refent->frameModel)];
+	mdx_t             *oldFrameModel      = &mdx_models[QHANDLETOINDEX_SAFE(refent->oldframeModel, refent->frameModel)];
+	mdx_t             *torsoFrameModel    = &mdx_models[QHANDLETOINDEX(refent->torsoFrameModel)];
 	mdx_t             *oldTorsoFrameModel = &mdx_models[QHANDLETOINDEX_SAFE(refent->oldTorsoFrameModel, refent->torsoFrameModel)];
 	mdx_t             *oldBoneFrameModel, *boneFrameModel;
 	struct bone       *bone;
@@ -2429,11 +2433,16 @@ static void mdx_RunLerpFrame(gentity_t *ent, glerpFrame_t *lf, int newAnimation,
 		//f = ( lf->frameTime - lf->animationTime ) / anim->frameLerp;
 		if (f >= anim->numFrames)
 		{
+			int loopFrames = anim->loopFrames;
+			if (anim->loopFrames == -1) {
+				loopFrames = anim->numFrames;
+			}
+
 			f -= anim->numFrames;
-			if (anim->loopFrames)
+			if (loopFrames)
 			{
-				f %= anim->loopFrames;
-				f += anim->numFrames - anim->loopFrames;
+				f %= loopFrames;
+				f += anim->numFrames - loopFrames;
 			}
 			else
 			{

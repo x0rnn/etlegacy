@@ -267,6 +267,11 @@ static void SV_MapRestart_f(void)
 		return;
 	}
 
+	if (svclc.demo.playing)
+	{
+		svclc.demo.fastForwardTime = 0;
+	}
+
 	if (Cmd_Argc() > 1)
 	{
 		delay = Q_atoi(Cmd_Argv(1));
@@ -429,14 +434,14 @@ void SV_TempBan(client_t *client, int length)
 			if (slot == -1 || oldesttime > svs.tempBans[i].endtime)
 			{
 				oldesttime = svs.tempBans[i].endtime;
-				slot     = i;
+				slot       = i;
 			}
 		}
 	}
 
 	svs.tempBans[slot].adr     = client->netchan.remoteAddress;
 	svs.tempBans[slot].endtime = svs.time + length * 1000;
-	Q_strcpy(svs.tempBans[slot].guid, client->guid);
+	Q_strncpyz(svs.tempBans[slot].guid, client->guid, sizeof(svs.tempBans[slot].guid));
 }
 
 /**
@@ -445,7 +450,7 @@ void SV_TempBan(client_t *client, int length)
  * @param[in] guid
  * @return
  */
-qboolean SV_TempBanIsBanned(netadr_t address, char *guid)
+qboolean SV_TempBanIsBanned(const netadr_t *address, char *guid)
 {
 	int i;
 
@@ -453,7 +458,7 @@ qboolean SV_TempBanIsBanned(netadr_t address, char *guid)
 	{
 		if (svs.tempBans[i].endtime && svs.tempBans[i].endtime > svs.time)
 		{
-			if (NET_CompareBaseAdr(address, svs.tempBans[i].adr))
+			if (NET_CompareBaseAdr(address, &svs.tempBans[i].adr))
 			{
 				return qtrue;
 			}
@@ -538,7 +543,7 @@ static void SV_Status_f(void)
 			Com_Printf("%4i ", ping);
 		}
 
-		s = NET_AdrToString(cl->netchan.remoteAddress);
+		s = NET_AdrToString(&cl->netchan.remoteAddress);
 
 		// extend the name length by couting extra color characters to keep well formated output
 		maxNameLength = sizeof(cl->name) + (strlen(cl->name) - Q_PrintStrlen(cl->name)) + 1;
@@ -576,7 +581,7 @@ static void SV_ConSay_f(void)
 		return;
 	}
 
-	Q_strcpy(text, "console: ");
+	Q_strncpyz(text, "console: ", sizeof(text));
 
 	if (*p == '"')
 	{
@@ -584,7 +589,7 @@ static void SV_ConSay_f(void)
 		p[strlen(p) - 1] = '\0';
 	}
 
-	Q_strcat(text, 1024, p);
+	Q_strcat(text, sizeof(text), p);
 
 	SV_SendServerCommand(NULL, "chat \"%s\"", text);
 }
@@ -745,6 +750,9 @@ void SV_AddOperatorCommands(void)
 	Cmd_AddCommand("devmap", SV_Map_f, "Loads a specific map in developer mode.", SV_CompleteMapName);
 	Cmd_AddCommand("killserver", SV_KillServer_f, "Kills the server.");
 	Cmd_AddCommand("cleartempbans", SV_TempBanClear_f, "Clears the temporary ban list.");
+
+	Cmd_AddCommand("tv", SV_CL_Commands_f, "tv commands.");
+
 	if (com_dedicated->integer)
 	{
 		Cmd_AddCommand("say", SV_ConSay_f, "Prints console messages on dedicated servers.");
@@ -759,6 +767,10 @@ void SV_AddOperatorCommands(void)
 #endif
 
 	SV_DemoInit();
+
+#ifdef DEDICATED
+	SV_CL_DemoInit();
+#endif // DEDICATED
 }
 
 /**

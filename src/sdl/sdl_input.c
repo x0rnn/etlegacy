@@ -1383,10 +1383,12 @@ static void IN_WindowFocusLost()
 {
 	if (cls.rendererStarted && cls.glconfig.isFullscreen)
 	{
+		Uint32 flags;
+
 		Com_DPrintf("Trying to minimize. Checking SDL flags.\n");
 		// If according to the game flags we should minimize,
 		// then lets actually make sure and ask the windowing system for its opinion.
-		Uint32 flags = SDL_GetWindowFlags(GLimp_MainWindow());
+		flags = SDL_GetWindowFlags(GLimp_MainWindow());
 		if (flags & SDL_WINDOW_FULLSCREEN && flags & SDL_WINDOW_SHOWN && !(flags & SDL_WINDOW_MINIMIZED) && flags & SDL_WINDOW_INPUT_GRABBED)
 		{
 			Com_DPrintf("SDL says we are good to go and call minimize.\n");
@@ -1543,7 +1545,11 @@ static void IN_ProcessEvents(void)
 			default:                   b = K_AUX1 + (e.button.button - SDL_BUTTON_X2 + 1) % 16;
 				break;
 			}
+#ifdef __ANDROID__
+			Com_QueueEvent(lasttime, SE_KEY, b, (e.type == SDL_MOUSEBUTTONDOWN ? qfalse : qtrue), 0, NULL);
+#else
 			Com_QueueEvent(lasttime, SE_KEY, b, (e.type == SDL_MOUSEBUTTONDOWN ? qtrue : qfalse), 0, NULL);
+#endif
 		}
 		break;
 		case SDL_MOUSEWHEEL:
@@ -1570,7 +1576,7 @@ static void IN_ProcessEvents(void)
 			{
 				char buffer[MAX_OSPATH];
 				Com_Memset(buffer, 0, sizeof(buffer));
-				Q_strcpy(buffer, e.drop.file);
+				Q_strncpyz(buffer, e.drop.file, sizeof(buffer));
 				COM_FixPath(buffer);
 				// Set the FS to "dirty" mode for the demo playback
 				Cbuf_AddText(va("demo dirty \"%s\"", buffer));
@@ -1605,6 +1611,7 @@ static void IN_ProcessEvents(void)
 					break;
 				}
 				IN_WindowFocusLost();
+			// fall through
 			case SDL_WINDOWEVENT_LEAVE:
 				Key_ClearStates();
 				Cvar_SetValue("com_unfocused", 1);
@@ -1618,6 +1625,7 @@ static void IN_ProcessEvents(void)
 					break;
 				}
 			}
+			// fall through
 			case SDL_WINDOWEVENT_FOCUS_GAINED:
 			{
 				Cvar_SetValue("com_unfocused", 0);

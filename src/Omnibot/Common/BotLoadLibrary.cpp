@@ -317,6 +317,8 @@ eomnibot_error Omnibot_LoadLibrary(int version, const char *lib, const char *pat
 #define POSTFIX ".so"
 #ifdef __x86_64__
 #define SUFFIX ".x86_64"
+#elif defined __aarch64__
+#define SUFFIX ".aarch64"
 #else
 #define SUFFIX
 #endif
@@ -416,7 +418,7 @@ void KeyVals::Reset()
 {
 	memset(m_Key, 0, sizeof(m_Key));
 	memset(m_String, 0, sizeof(m_String));
-	memset(m_Value, 0, sizeof(m_Value));
+	(*m_Value) = {};
 }
 
 /**

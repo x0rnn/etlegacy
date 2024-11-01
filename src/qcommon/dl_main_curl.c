@@ -78,8 +78,6 @@
 		if (((status) = curl_easy_setopt((handle), (opt), (param)))) \
 		Com_Printf(S_COLOR_YELLOW "WARNING: %s: curl_easy_setopt " #opt ": %s\n", __func__, curl_easy_strerror(status))
 
-#define FILE_DOWNLOAD_ID 1
-
 static struct
 {
 	qboolean initialized;   ///< the main initialization flag (Initialize once)
@@ -96,24 +94,29 @@ static CURLcode DL_cb_Context(CURL *curl, void *ssl_ctx, void *parm)
 {
 	fileHandle_t certHandle;
 	int          i;
+	int          len;
+	char         *buffer;
+	BIO          *cbio;
+	X509_STORE   *cts;
+	STACK_OF(X509_INFO) * inf;
+
 	(void)curl;
 	(void)parm;
 
-	int len = (int) FS_SV_FOpenFileRead(CA_CERT_FILE, &certHandle);
+	len = (int) FS_SV_FOpenFileRead(CA_CERT_FILE, &certHandle);
 	if (len <= 0)
 	{
 		FS_FCloseFile(certHandle);
 		goto callback_failed;
 	}
 
-	char *buffer = Com_Allocate(len + 1);
+	buffer      = Com_Allocate(len + 1);
 	buffer[len] = 0;
 	FS_Read(buffer, len, certHandle);
 	FS_FCloseFile(certHandle);
 
-	BIO        *cbio = BIO_new_mem_buf(buffer, len);
-	X509_STORE *cts  = SSL_CTX_get_cert_store((SSL_CTX *)ssl_ctx);
-	STACK_OF(X509_INFO) * inf;
+	cbio = BIO_new_mem_buf(buffer, len);
+	cts  = SSL_CTX_get_cert_store((SSL_CTX *)ssl_ctx);
 
 	if (!cts || !cbio)
 	{
@@ -186,7 +189,7 @@ static size_t DL_cb_FWriteFile(void *ptr, size_t size, size_t nmemb, void *userp
  * @note cl_downloadSize and cl_downloadTime are set by the Q3 protocol...
  * and it would probably be expensive to verify them here.
  */
-static int DL_cb_Progress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow)
+static int DL_cb_Progress(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)
 {
 	int          resp     = 0;
 	webRequest_t *request = (webRequest_t *)clientp;
@@ -196,7 +199,7 @@ static int DL_cb_Progress(void *clientp, double dltotal, double dlnow, double ul
 		return -666;
 	}
 
-	if (request->data.requestLength)
+	if (!request->data.requestLength)
 	{
 		if (request->upload)
 		{
@@ -212,11 +215,11 @@ static int DL_cb_Progress(void *clientp, double dltotal, double dlnow, double ul
 	{
 		if (request->upload)
 		{
-			resp = request->progress_clb(request, ulnow, ultotal);
+			resp = request->progress_clb(request, (double)ulnow, (double)ultotal);
 		}
 		else
 		{
-			resp = request->progress_clb(request, dlnow, dltotal);
+			resp = request->progress_clb(request, (double)dlnow, (double)dltotal);
 		}
 	}
 	return resp;
@@ -396,6 +399,8 @@ static unsigned int DL_GetRequestId()
 {
 	while (qtrue)
 	{
+		webRequest_t **lst;
+
 		unsigned int tmp = 1 + (++webSys.requestId);
 
 		// 0 is an invalid id, and 1 is reserved
@@ -406,7 +411,7 @@ static unsigned int DL_GetRequestId()
 
 		// wrap around protection
 		// very highly unlikely that this ever happens, but you never know
-		webRequest_t **lst = &webSys.requests;
+		lst = &webSys.requests;
 
 		while (*lst)
 		{
@@ -475,6 +480,8 @@ static void DL_FreeRequest(webRequest_t *request)
 			*lst = request->next;
 			break;
 		}
+
+		lst = &(*lst)->next;
 	}
 
 	if (request->data.fileHandle)
@@ -514,7 +521,7 @@ static void DL_FreeRequest(webRequest_t *request)
  * @param remoteName
  * @return
  */
-unsigned int DL_BeginDownload(const char *localName, const char *remoteName, webCallbackFunc_t complete, webProgressCallbackFunc_t progress)
+unsigned int DL_BeginDownload(const char *localName, const char *remoteName, void *userData, webCallbackFunc_t complete, webProgressCallbackFunc_t progress)
 {
 	char         referer[MAX_STRING_CHARS + 5 /*"et://"*/];
 	CURLcode     status;
@@ -538,9 +545,11 @@ unsigned int DL_BeginDownload(const char *localName, const char *remoteName, web
 		return 0;
 	}
 
-	request     = DL_CreateRequest();
-	request->id = FILE_DOWNLOAD_ID; // magical package download id
+	request           = DL_CreateRequest();
+	request->id       = FILE_DOWNLOAD_ID; // magical package download id
+	request->userData = userData;
 	Q_strncpyz(request->url, remoteName, ARRAY_LEN(request->url));
+	Q_strncpyz(request->data.name, localName, ARRAY_LEN(request->data.name));
 
 	request->data.fileHandle = Sys_FOpen(localName, "wb");
 	if (!request->data.fileHandle)
@@ -553,7 +562,7 @@ unsigned int DL_BeginDownload(const char *localName, const char *remoteName, web
 	DL_InitDownload();
 
 	/* ET://ip:port */
-	strcpy(referer, "et://");
+	Q_strncpyz(referer, "et://", sizeof(referer));
 	Q_strncpyz(referer + 5, Cvar_VariableString("cl_currentServerIP"), MAX_STRING_CHARS);
 
 	request->rawHandle = curl_easy_init();
@@ -564,9 +573,10 @@ unsigned int DL_BeginDownload(const char *localName, const char *remoteName, web
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_USERAGENT, va("%s %s", APP_NAME "/" APP_VERSION, curl_version()));
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_REFERER, referer);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_URL, remoteName);
+	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_WRITEFUNCTION, DL_cb_FWriteFile);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_WRITEDATA, (void *)request);
-	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_PROGRESSFUNCTION, DL_cb_Progress);
+	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_XFERINFOFUNCTION, DL_cb_Progress);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_PROGRESSDATA, (void *)request);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_NOPROGRESS, 0);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_FAILONERROR, 1);
@@ -643,9 +653,10 @@ unsigned int Web_CreateRequest(const char *url, const char *authToken, webUpload
 
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_USERAGENT, va("%s %s", APP_NAME "/" APP_VERSION, curl_version()));
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_URL, url);
+	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_WRITEFUNCTION, DL_write_function);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_WRITEDATA, (void *)request);
-	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_PROGRESSFUNCTION, DL_cb_Progress);
+	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_XFERINFOFUNCTION, DL_cb_Progress);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_PROGRESSDATA, (void *)request);
 	ETL_curl_easy_setopt(status, request->rawHandle, CURLOPT_FORBID_REUSE, 1L);
 
@@ -761,16 +772,20 @@ void DL_DownloadLoop(void)
 
 	while ((msg = curl_multi_info_read(webSys.multiHandle, &dls)))
 	{
+		long             code;
+		CURL             *handle;
+		webRequest_t     **lst;
+		webRequestResult result;
+
 		if (msg->msg != CURLMSG_DONE)
 		{
 			DL_SetupContentLength(msg->easy_handle);
 			continue;
 		}
 
-		long             code;
-		CURL             *handle = msg->easy_handle;
-		webRequest_t     **lst   = &webSys.requests;
-		webRequestResult result  = msg->data.result == CURLE_OK ? REQUEST_OK : REQUEST_NOK;
+		handle = msg->easy_handle;
+		lst    = &webSys.requests;
+		result = msg->data.result == CURLE_OK ? REQUEST_OK : REQUEST_NOK;
 
 		// before doing anything else, remove the request from the multi-handle
 		curl_multi_remove_handle(webSys.multiHandle, handle);

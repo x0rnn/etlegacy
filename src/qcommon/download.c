@@ -154,7 +154,7 @@ static void Com_DownloadsComplete(void)
 		return;
 	}
 
-	// I wonder if that happens - it should not but I suspect it could happen if a download fails in the middle or is aborted
+	// I wonder if that happens - it should not, but I suspect it could happen if a download fails in the middle or is aborted
 	etl_assert(!dld.bWWWDlDisconnected);
 
 #ifndef DEDICATED
@@ -200,6 +200,16 @@ static void Com_WebDownloadComplete(webRequest_t *request, webRequestResult requ
 	const char *to_ospath;
 
 	Cvar_Set("ui_dl_running", "0");
+
+	if (requestResult == REQUEST_ABORT)
+	{
+		Com_Printf("Download aborted for file '%s'\n", request->data.name);
+		if (Sys_Remove(request->data.name) == -1)
+		{
+			Com_Printf(S_COLOR_RED "ERROR: Com_WebDownloadComplete - cannot remove file '%s'\n", request->data.name);
+		}
+		return;
+	}
 
 	if (!requestResult)
 	{
@@ -284,8 +294,8 @@ static void Com_WebDownloadComplete(webRequest_t *request, webRequestResult requ
 		}
 		else
 		{
-			strcat(dld.redirectedList, "@");
-			strcat(dld.redirectedList, dld.originalDownloadName);
+			Q_strcat(dld.redirectedList, sizeof(dld.redirectedList), "@");
+			Q_strcat(dld.redirectedList, sizeof(dld.redirectedList), dld.originalDownloadName);
 		}
 	}
 
@@ -301,7 +311,44 @@ static int Com_WebDownloadProgress(webRequest_t *request, double now, double tot
 
 unsigned int Com_BeginWebDownload(const char *localName, const char *remoteName)
 {
-	return DL_BeginDownload(localName, remoteName, &Com_WebDownloadComplete, &Com_WebDownloadProgress);
+	return DL_BeginDownload(localName, remoteName, NULL, &Com_WebDownloadComplete, &Com_WebDownloadProgress);
+}
+
+static void Com_WebDownloadFileSimpleComplete(webRequest_t *request, webRequestResult requestResult)
+{
+	if (!requestResult)
+	{
+		return;
+	}
+	if (FS_FileInPathExists(request->data.name))
+	{
+		char final_filename[MAX_OSPATH] = { 0 };
+		COM_StripExtension(request->data.name, final_filename, sizeof(final_filename));
+		if (Sys_Rename(request->data.name, final_filename))
+		{
+			FS_CopyFile(request->data.name, final_filename);
+
+			if (Sys_Remove(request->data.name) != 0)
+			{
+				Com_Printf("WARNING: Com_WWWDownload - cannot remove file '%s'\n", request->data.name);
+			}
+		}
+	}
+	else
+	{
+		Com_DPrintf("Downloaded file does not exist (anymore?) '%s'\n", request->data.name);
+	}
+}
+
+unsigned int Com_DownloadFileSimple(const char *localName, const char *remoteName)
+{
+	char tmpPath[MAX_OSPATH] = { 0 };
+	Q_strncpyz(tmpPath, localName, sizeof(tmpPath));
+	if (!Q_StringEndsWith(tmpPath, ".tmp"))
+	{
+		Q_strcat(tmpPath, sizeof(tmpPath), ".tmp");
+	}
+	return DL_BeginDownload(tmpPath, remoteName, NULL, &Com_WebDownloadFileSimpleComplete, &Com_WebDownloadProgress);
 }
 
 static void checkDownloadName(char *filename)
@@ -471,37 +518,12 @@ qboolean Com_WWWBadChecksum(const char *pakname)
 			Com_Printf("ERROR: badChecksumList overflowed (%s)\n", dld.badChecksumList);
 			return qfalse;
 		}
-		strcat(dld.badChecksumList, "@");
-		strcat(dld.badChecksumList, pakname);
+		Q_strcat(dld.badChecksumList, sizeof(dld.badChecksumList), "@");
+		Q_strcat(dld.badChecksumList, sizeof(dld.badChecksumList), pakname);
 		Com_DPrintf("bad checksums: %s\n", dld.badChecksumList);
 		return qtrue;
 	}
 	return qfalse;
-}
-
-/**
- * @brief Com_SetupDownloadRaw
- * @param[in] remote
- * @param[in] filename
- */
-static void Com_SetupDownloadRaw(const char *remote, const char *path, const char *filename, const char *tempName, qboolean systemDownload, qboolean noReconnect)
-{
-	dld.bWWWDl             = qtrue;
-	dld.bWWWDlDisconnected = qtrue;
-	dld.systemDownload     = systemDownload;
-	dld.noReconnect        = noReconnect;
-
-	// download format: @remotename@localname
-	Q_strncpyz(dld.downloadList, va("@%s@%s", filename, filename), MAX_INFO_STRING);
-	Q_strncpyz(dld.originalDownloadName, path[0] ? va("%s/%s", path, filename) : filename, sizeof(dld.originalDownloadName));
-	Q_strncpyz(dld.downloadName, va("%s/%s", remote, filename), sizeof(dld.downloadName));
-	Q_strncpyz(dld.downloadTempName, tempName, sizeof(dld.downloadTempName));
-
-	if (!Com_BeginWebDownload(dld.downloadTempName, dld.downloadName))
-	{
-		dld.bWWWDlAborting = qtrue;
-		Com_Error(ERR_DROP, "Could not download file: \"%s\"", dld.downloadName);
-	}
 }
 
 /**
@@ -597,7 +619,7 @@ void Com_CheckCaCertStatus(void)
 
 	if (downloadFile)
 	{
-		Com_SetupDownloadRaw(MIRROR_SERVER_URL "/certificates", "", CA_CERT_FILE, CA_CERT_FILE TMP_FILE_EXTENSION, qtrue, qtrue);
+		Com_DownloadFileSimple(ospath, MIRROR_SERVER_URL "/certificates/" CA_CERT_FILE);
 	}
 #else
 	Com_Printf("Using system ssl certificates\n");
