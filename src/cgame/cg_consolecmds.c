@@ -3175,19 +3175,20 @@ static int CG_GetSelectableMajorSpawn(const char *targetName, team_t playerTeam)
 }
 
 /**
- * @brief Command to select the nearest visible minor spawnpoint
+ * @brief Command to select the nearest visible or nearby minor spawnpoint
  */
 static void CG_SelectSpawn_f(void)
 {
-	vec3_t playerOrigin;
+	vec3_t          playerOrigin;
 	cg_spawnpoint_t *spawnpoint;
-	cg_spawnpoint_t *bestMinorSpawn = NULL;
-	cg_spawnpoint_t *bestMajorSpawn = NULL;
-	float closestMinorDist = FLT_MAX;
-	float closestMajorDist = FLT_MAX;
-	int i;
-	team_t playerTeam;
-	qboolean spawnSet = qfalse;
+	cg_spawnpoint_t *bestMinorSpawn  = NULL;
+	cg_spawnpoint_t *bestMajorSpawn  = NULL;
+	float           closestMinorDist = FLT_MAX;
+	float           closestMajorDist = FLT_MAX;
+	const float     maxDistSq        = (1024.0f * 1024.0f);
+	int             i;
+	team_t          playerTeam;
+	qboolean        spawnSet = qfalse;
 	
 	if (!cg.snap)
 	{
@@ -3207,8 +3208,10 @@ static void CG_SelectSpawn_f(void)
 	for (i = 0; i < cg.numSpawnpointEnts; i++)
 	{
 		spawnpoint = &cgs.spawnpointEnt[i];
+		qboolean inPVS = trap_R_inPVS(cg.refdef_current->vieworg, spawnpoint->origin);
+		float    dist  = VectorDistanceSquared(playerOrigin, spawnpoint->origin);
 
-		if (!trap_R_inPVS(cg.refdef_current->vieworg, spawnpoint->origin))
+		if (!inPVS && dist > maxDistSq)
 		{
 			continue;
 		}
@@ -3291,7 +3294,7 @@ static void CG_SelectSpawn_f(void)
 
 	if (!spawnSet)
 	{
-		CG_Printf("No valid spawnpoints nearby.\n");
+		CG_PriorityCenterPrint("^1No valid spawnpoints nearby!\n", -1);
 	}
 }
 
