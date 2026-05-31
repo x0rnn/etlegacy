@@ -2654,8 +2654,6 @@ qboolean G_LandmineSnapshotCallback(int entityNum, int clientNum);
 #define MAPVOTE_ALT_INTERMISSION 2 ///< unused
 #define MAPVOTE_MULTI_VOTE       4
 #define MAPVOTE_NO_RANDOMIZE     8 ///< unused
-#define MAPVOTE_NEXTMAP_VOTEMAP  16
-
 
 // Spawnflags end
 

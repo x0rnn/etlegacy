@@ -932,25 +932,8 @@ int G_Nextmap_v(gentity_t *ent, unsigned int dwVoteIndex, char *arg, char *arg2,
 		}
 		else if (g_gametype.integer == GT_WOLF_MAPVOTE)
 		{
-			if (g_gamestate.integer == GS_PLAYING     // don't do in intermission (check warmup/warmup-countdown
-			    && (g_mapVoteFlags.integer & MAPVOTE_NEXTMAP_VOTEMAP))
-			{
-				// Don't do this. This is awkward, since it is not done at
-				// !nextmap nor nextcampaignvotes. Besides we don't want to store
-				// mapstats of an unfinished map or spend resources at generating
-				// playerstats
-				// G_LogExit( "Nextmap vote passed" );
-				// - There is a flag for so let the users decide
-				//   Some log parsers require G_LogExit
-				AP("chat \"^3*** Nextmap vote passed - vote a new map! ***\"");
-				G_LogExit("Nextmap vote passed");
-			}
-			else
-			{
-				AP("cp \"^3*** Loading nextmap! ***\n\"");
-				// Load in the nextmap
-				trap_SendConsoleCommand(EXEC_APPEND, "vstr nextmap\n");
-			}
+			AP("chat \"^3*** Nextmap vote passed - vote a new map! ***\"");
+			G_LogExit("Nextmap vote passed");
 		}
 		else
 		{
