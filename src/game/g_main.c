@@ -1550,9 +1550,21 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 		trap_SetConfigstring(CS_ROUNDSCORES2, va("%i", g_alliedwins.integer));
 	}
 
-	if (g_gametype.integer == GT_WOLF || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE)
+	if (g_gametype.integer == GT_WOLF || g_gametype.integer == GT_WOLF_STOPWATCH)
 	{
 		G_ClearMapXP();
+	}
+
+	if (g_gametype.integer == GT_WOLF_MAPVOTE)
+	{
+		if (level.mapsSinceLastXPReset == 0)
+		{
+			G_ClearMapXP();
+		}
+		else
+		{
+			G_GetMapXP();
+		}
 	}
 
 	// time
@@ -1640,10 +1652,10 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 	{
 		char mapConfig[MAX_STRING_CHARS];
 
-		//trap_Cvar_Set("C", va("%d,%d",
-		//        ((level.mapsSinceLastXPReset >= g_resetXPMapCount.integer) ?
-		//               0 : level.mapsSinceLastXPReset)+1,
-		//       g_resetXPMapCount.integer));
+		if (g_resetXPMapCount.integer > 0)
+		{
+			level.mapsSinceLastXPReset = trap_Cvar_VariableIntegerValue("g_mapsSinceLastXPReset");
+		}
 
 		if (g_mapConfigs.string[0] && g_resetXPMapCount.integer)
 		{
@@ -1725,9 +1737,6 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 
 	numSplinePaths = 0 ;
 	numPathCorners = 0;
-
-	// MAPVOTE
-	level.mapsSinceLastXPReset = 0;
 
 	// init objective indicator
 	level.flagIndicator   = 0;
@@ -2806,9 +2815,25 @@ void ExitLevel(void)
 	{
 		int nextMap = -1, highMapVote = 0, curMapVotes = 0, maxMaps, highMapAge = 0, curMapAge = 0;
 
-		if (g_resetXPMapCount.integer)
+		if (g_resetXPMapCount.integer > 0)
 		{
 			level.mapsSinceLastXPReset++;
+			if (level.mapsSinceLastXPReset >= g_resetXPMapCount.integer)
+			{
+				int j;
+				for (i = 0; i < level.numConnectedClients; i++)
+				{
+					gclient_t *client = &level.clients[level.sortedClients[i]];
+					for (j = 0; j < SK_NUM_SKILLS; j++)
+					{
+						client->sess.skillpoints[j]      = 0;
+						client->sess.startskillpoints[j] = 0;
+					}
+					client->ps.stats[STAT_XP] = 0;
+				}
+				level.mapsSinceLastXPReset = 0;
+			}
+			trap_Cvar_Set("g_mapsSinceLastXPReset", va("%i", level.mapsSinceLastXPReset));
 		}
 
 		maxMaps = Com_Clamp(0, level.mapVoteNumMaps, g_maxMapsVotedFor.integer);
@@ -2868,7 +2893,8 @@ void ExitLevel(void)
 	// reset all the scores so we don't enter the intermission again
 	level.teamScores[TEAM_AXIS]   = 0;
 	level.teamScores[TEAM_ALLIES] = 0;
-	if (g_gametype.integer != GT_WOLF_CAMPAIGN)
+	if (g_gametype.integer != GT_WOLF_CAMPAIGN &&
+	    !(g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0 && level.mapsSinceLastXPReset > 0))
 	{
 		gclient_t *cl;
 

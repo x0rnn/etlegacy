@@ -593,8 +593,9 @@ char *G_createStats(gentity_t *ent)
 	}
 
 	// Add skillpoints as necessary
-	if (((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH) && (g_xpSaver.integer & XPSF_ENABLE)) ||
+	f (((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH) && (g_xpSaver.integer & XPSF_ENABLE)) ||
 	    (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
+	    (g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0) ||
 	    (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
 	{
 		for (i = SK_BATTLE_SENSE; i < SK_NUM_SKILLS; i++)

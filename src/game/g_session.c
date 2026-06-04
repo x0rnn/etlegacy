@@ -388,6 +388,10 @@ void G_ReadSessionData(gclient_t *client)
 			}
 		}
 	}
+	else if (g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0)
+	{
+		restoreStats = qtrue;
+	}
 
 	client->sess.sessionTeam         = Q_ReadIntValueJson(root, "sessionTeam");
 	client->sess.spectatorTime       = Q_ReadIntValueJson(root, "spectatorTime");
@@ -674,7 +678,8 @@ void G_InitWorldSession(void)
 
 		// See if we need to clear player stats
 		// FIXME: deal with the multi-map missions
-		if (g_gametype.integer != GT_WOLF_CAMPAIGN)
+		if (g_gametype.integer != GT_WOLF_CAMPAIGN &&
+		    !(g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0))
 		{
 			if ((tmp = strchr(va("%s", tmp), ' ')) != NULL)
 			{
