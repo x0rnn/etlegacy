@@ -129,7 +129,10 @@ void G_GetClientPrestige(gclient_t *cl)
 	gentity_t *ent;
 
 	// disable for these game types
-	if (g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_LMS)
+	// mapvote with g_resetXPMapCount behaves like a dynamic campaign: XP is reset
+	// every N maps, so prestige must not persist/restore XP across the reset
+	if (g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_LMS ||
+	    (g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0))
 	{
 		return;
 	}
@@ -195,7 +198,10 @@ void G_SetClientPrestige(gclient_t *cl, qboolean streakUp)
 	qboolean  hasMapXPs = qfalse;
 
 	// disable for these game types
-	if (g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_LMS)
+	// mapvote with g_resetXPMapCount behaves like a dynamic campaign: XP is reset
+	// every N maps, so prestige must not persist/restore XP across the reset
+	if (g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_LMS ||
+	    (g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0))
 	{
 		return;
 	}
