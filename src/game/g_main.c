@@ -1557,6 +1557,11 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 
 	if (g_gametype.integer == GT_WOLF_MAPVOTE)
 	{
+		if (g_resetXPMapCount.integer > 0)
+		{
+			level.mapsSinceLastXPReset = trap_Cvar_VariableIntegerValue("g_mapsSinceLastXPReset");
+		}
+
 		if (level.mapsSinceLastXPReset == 0)
 		{
 			G_ClearMapXP();
@@ -1651,11 +1656,6 @@ void G_InitGame(int levelTime, int randomSeed, int restart, int etLegacyServer, 
 	if (g_gametype.integer == GT_WOLF_MAPVOTE)
 	{
 		char mapConfig[MAX_STRING_CHARS];
-
-		if (g_resetXPMapCount.integer > 0)
-		{
-			level.mapsSinceLastXPReset = trap_Cvar_VariableIntegerValue("g_mapsSinceLastXPReset");
-		}
 
 		if (g_mapConfigs.string[0] && g_resetXPMapCount.integer)
 		{
@@ -2088,7 +2088,8 @@ int QDECL SortRanks(const void *a, const void *b)
 
 		if (!(((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF) && (g_xpSaver.integer & XPSF_ENABLE)) ||
 		      (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
-		      (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0)))
+		      (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0) ||
+		      (g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0)))
 		{
 			// current map XPs only
 			totalXP[0] -= ca->sess.startxptotal;

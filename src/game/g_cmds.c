@@ -402,7 +402,8 @@ qboolean G_SendScore_Add(gentity_t *ent, int i, char *buf, int bufsize)
 
 		if (((g_gametype.integer == GT_WOLF_CAMPAIGN || g_gametype.integer == GT_WOLF_STOPWATCH || g_gametype.integer == GT_WOLF_MAPVOTE || g_gametype.integer == GT_WOLF) && (g_xpSaver.integer & XPSF_ENABLE)) ||
 		    (g_gametype.integer == GT_WOLF_CAMPAIGN && (g_campaigns[level.currentCampaign].current != 0 && !level.newCampaign)) ||
-		    (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0))
+		    (g_gametype.integer == GT_WOLF_LMS && g_currentRound.integer != 0) ||
+		    (g_gametype.integer == GT_WOLF_MAPVOTE && g_resetXPMapCount.integer > 0))
 		{
 			for (j = SK_BATTLE_SENSE; j < SK_NUM_SKILLS; j++)
 			{
